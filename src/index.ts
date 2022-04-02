@@ -78,8 +78,8 @@ export class CarbonClient {
     readonly family?: 4 | 6;
     autoReconnect: boolean;
 
-    private socket: NetSocket|DgramSocket|null = null;
-    private callbacks: { [key in keyof EventMap]: Callbacks<EventMap[key]> } = {
+    private _socket: NetSocket|DgramSocket|null = null;
+    private _callbacks: { [key in keyof EventMap]: Callbacks<EventMap[key]> } = {
         connect: { callbacks: [], emitActive: false, remove: [] },
         error:   { callbacks: [], emitActive: false, remove: [] },
         close:   { callbacks: [], emitActive: false, remove: [] },
@@ -139,17 +139,17 @@ export class CarbonClient {
             this._emit('close', hadError);
         } finally {
             try {
-                if (this.socket) {
-                    this.socket.off('connect', this._onConnect);
-                    this.socket.off('error', this._onError);
+                if (this._socket) {
+                    this._socket.off('connect', this._onConnect);
+                    this._socket.off('error', this._onError);
                     if (this.transport === 'TCP' || this.transport === 'IPC') {
-                        this.socket.off('close', this._onClose);
+                        this._socket.off('close', this._onClose);
                     } else {
-                        this.socket.off('close', this._onCloseOk);
+                        this._socket.off('close', this._onCloseOk);
                     }
                 }
             } finally {
-                this.socket = null;
+                this._socket = null;
                 if (hadError && this.autoReconnect) {
                     this.connect().catch(this._onError);
                 }
@@ -162,16 +162,16 @@ export class CarbonClient {
     };
 
     async connect(): Promise<void> {
-        if (this.socket) {
+        if (this._socket) {
             throw new Error('already connected');
         }
 
         let address: string;
         if (this.transport === 'TCP' || this.transport === 'IPC') {
             address = this.address;
-            this.socket = new NetSocket({ writable: true });
+            this._socket = new NetSocket({ writable: true });
 
-            this.socket.on('close', this._onClose);
+            this._socket.on('close', this._onClose);
         } else {
             if (this.family === undefined) {
                 const addresses = await dns.lookup(this.address, { all: true });
@@ -180,53 +180,53 @@ export class CarbonClient {
                     throw new Error(`host not found: ${this.address}`);
                 }
                 address = adr.address;
-                this.socket = createDgramSocket({
+                this._socket = createDgramSocket({
                     type: adr.family === 6 ? 'udp6' : 'udp4',
                     sendBufferSize: this.sendBufferSize,
                 });
             } else {
                 address = this.address;
-                this.socket = createDgramSocket({
+                this._socket = createDgramSocket({
                     type: this.family === 6 ? 'udp6' : 'udp4',
                     sendBufferSize: this.sendBufferSize,
                 });
             }
 
-            this.socket.on('close', this._onCloseOk);
+            this._socket.on('close', this._onCloseOk);
         }
 
-        this.socket.on('connect', this._onConnect);
-        this.socket.on('error', this._onError);
+        this._socket.on('connect', this._onConnect);
+        this._socket.on('error', this._onError);
 
         return new Promise((resolve, reject) => {
             try {
-                if (!this.socket) {
+                if (!this._socket) {
                     return reject(new Error('socket gone before could connect'));
                 }
 
                 const callback = () => {
                     try {
-                        this.socket?.off('error', reject);
+                        this._socket?.off('error', reject);
                     } finally {
                         resolve();
                     }
                 };
                 if (this.transport === 'IPC') {
-                    if (this.socket instanceof DgramSocket) {
+                    if (this._socket instanceof DgramSocket) {
                         return reject(new Error('socket changed type!?'));
                     }
-                    this.socket.once('error', reject);
-                    this.socket.connect(address, callback);
+                    this._socket.once('error', reject);
+                    this._socket.connect(address, callback);
                 } else {
-                    this.socket.once('error', reject);
-                    if (this.family !== undefined && this.socket instanceof NetSocket) {
-                        this.socket.connect({
+                    this._socket.once('error', reject);
+                    if (this.family !== undefined && this._socket instanceof NetSocket) {
+                        this._socket.connect({
                             host: address,
                             port: this.port,
                             family: this.family
                         }, callback);
                     } else {
-                        this.socket.connect(this.port, address, callback);
+                        this._socket.connect(this.port, address, callback);
                     }
                 }
             } catch (error) {
@@ -236,25 +236,25 @@ export class CarbonClient {
     }
 
     get isConnected(): boolean {
-        return this.socket !== null;
+        return this._socket !== null;
     }
 
     disconnect(callback: (error?: Error) => void): void;
     disconnect(): Promise<void>;
 
     disconnect(callback?: (error?: Error) => void): Promise<void>|void {
-        if (!this.socket) {
+        if (!this._socket) {
             throw new Error('not connected');
         }
 
         if (callback) {
-            if (this.socket instanceof DgramSocket) {
-                this.socket.close(callback);
+            if (this._socket instanceof DgramSocket) {
+                this._socket.close(callback);
             } else {
-                this.socket.end(() => {
+                this._socket.end(() => {
                     try {
-                        if (this.socket instanceof NetSocket) {
-                            this.socket.destroy();
+                        if (this._socket instanceof NetSocket) {
+                            this._socket.destroy();
                         }
                     } catch (error) {
                         return callback(error instanceof Error ? error : new Error(String(error)));
@@ -264,18 +264,18 @@ export class CarbonClient {
             }
         } else {
             return new Promise((resolve, reject) => {
-                if (!this.socket) {
+                if (!this._socket) {
                     return resolve();
                 }
 
                 try {
-                    if (this.socket instanceof DgramSocket) {
-                        this.socket.close(resolve);
+                    if (this._socket instanceof DgramSocket) {
+                        this._socket.close(resolve);
                     } else {
-                        this.socket.end(() => {
+                        this._socket.end(() => {
                             try {
-                                if (this.socket instanceof NetSocket) {
-                                    this.socket.destroy();
+                                if (this._socket instanceof NetSocket) {
+                                    this._socket.destroy();
                                 }
                             } catch (error) {
                                 return reject(error);
@@ -291,15 +291,15 @@ export class CarbonClient {
     }
 
     on<Event extends keyof EventMap>(event: Event, callback: EventMap[Event]): void {
-        this.callbacks[event].callbacks.push({ callback, once: false });
+        this._callbacks[event].callbacks.push({ callback, once: false });
     }
 
     once<Event extends keyof EventMap>(event: Event, callback: EventMap[Event]): void {
-        this.callbacks[event].callbacks.push({ callback, once: true });
+        this._callbacks[event].callbacks.push({ callback, once: true });
     }
 
     off<Event extends keyof EventMap>(event: Event, callback: EventMap[Event]): void {
-        const infos = this.callbacks[event];
+        const infos = this._callbacks[event];
         // avoid concurrent modification
         if (infos.emitActive) {
             infos.remove.push(callback);
@@ -312,7 +312,7 @@ export class CarbonClient {
     }
 
     private _emit<Event extends keyof EventMap>(event: Event, arg: Arg0<EventMap[Event]>): void {
-        const infos = this.callbacks[event];
+        const infos = this._callbacks[event];
         const oldEmitActive = infos.emitActive;
         infos.emitActive = true;
         try {
@@ -320,7 +320,7 @@ export class CarbonClient {
                 try {
                     info.callback.call(this, arg);
                 } catch (error) {
-                    if (event !== 'error' && this.callbacks.error.callbacks.length > 0) {
+                    if (event !== 'error' && this._callbacks.error.callbacks.length > 0) {
                         setImmediate(() =>
                             this._emit(
                                 'error',
@@ -351,19 +351,19 @@ export class CarbonClient {
     private _send(data: string|Buffer): Promise<void> {
         return new Promise((resolve, reject) => {
             try {
-                if (!this.socket) {
+                if (!this._socket) {
                     return reject(new Error('socket gone before data could be sent'));
                 }
 
-                if (this.socket instanceof DgramSocket) {
-                    this.socket.send(data, (error, bytes) => {
+                if (this._socket instanceof DgramSocket) {
+                    this._socket.send(data, (error, bytes) => {
                         if (error) {
                             return reject(error);
                         }
                         resolve();
                     });
                 } else {
-                    this.socket.write(data, error => {
+                    this._socket.write(data, error => {
                         if (error) {
                             return reject(error);
                         }
@@ -385,7 +385,7 @@ export class CarbonClient {
     write(path: string, value: number, tags?: Tags): Promise<void>;
 
     async write(path: string, value: number, arg3?: Date|Tags, arg4?: Tags): Promise<void> {
-        if (!this.socket) {
+        if (!this._socket) {
             throw new Error('not connected');
         }
 
