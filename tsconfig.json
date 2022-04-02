@@ -18,7 +18,8 @@
       "strictNullChecks": true,
       "noImplicitThis": true,
       "strictPropertyInitialization": true,
-      "useUnknownInCatchVariables": true
+      "useUnknownInCatchVariables": true,
+      "noImplicitAny": true
     },
     "include": ["./src/**/*"],
     "exclude": ["node_modules"]
