@@ -28,6 +28,7 @@ export interface CarbonClientOptions {
     autoReconnect?: boolean;
     transport?: Transport;
     sendBufferSize?: number;
+    family?: 4 | 6;
 }
 
 export type MetricTuple =
@@ -74,6 +75,7 @@ export class CarbonClient {
     readonly port: number;
     readonly transport: Transport;
     readonly sendBufferSize?: number;
+    readonly family?: 4 | 6;
     autoReconnect: boolean;
 
     private socket: NetSocket|DgramSocket|null = null;
@@ -96,6 +98,9 @@ export class CarbonClient {
             this.autoReconnect = arg1.autoReconnect ?? false;
             if (transport === 'UDP') {
                 this.sendBufferSize = arg1.sendBufferSize;
+            }
+            if (transport !== 'IPC') {
+                this.family = arg1.family;
             }
         } else {
             this.address = arg1;
@@ -168,16 +173,24 @@ export class CarbonClient {
 
             this.socket.on('close', this._onClose);
         } else {
-            const addresses = await dns.lookup(this.address, { all: true });
-            const adr = addresses.find(adr => adr.family === 6) ?? addresses.find(adr => adr.family === 4);
-            if (!adr) {
-                throw new Error(`host not found: ${this.address}`);
+            if (this.family === undefined) {
+                const addresses = await dns.lookup(this.address, { all: true });
+                const adr = addresses.find(adr => adr.family === 6) ?? addresses.find(adr => adr.family === 4);
+                if (!adr) {
+                    throw new Error(`host not found: ${this.address}`);
+                }
+                address = adr.address;
+                this.socket = createDgramSocket({
+                    type: adr.family === 6 ? 'udp6' : 'udp4',
+                    sendBufferSize: this.sendBufferSize,
+                });
+            } else {
+                address = this.address;
+                this.socket = createDgramSocket({
+                    type: this.family === 6 ? 'udp6' : 'udp4',
+                    sendBufferSize: this.sendBufferSize,
+                });
             }
-            address = adr.address;
-            this.socket = createDgramSocket({
-                type: adr.family === 6 ? 'udp6' : 'udp4',
-                sendBufferSize: this.sendBufferSize,
-            });
 
             this.socket.on('close', this._onCloseOk);
         }
@@ -206,7 +219,15 @@ export class CarbonClient {
                     this.socket.connect(address, callback);
                 } else {
                     this.socket.once('error', reject);
-                    this.socket.connect(this.port, address, callback);
+                    if (this.family !== undefined && this.socket instanceof NetSocket) {
+                        this.socket.connect({
+                            host: address,
+                            port: this.port,
+                            family: this.family
+                        }, callback);
+                    } else {
+                        this.socket.connect(this.port, address, callback);
+                    }
                 }
             } catch (error) {
                 reject(error);

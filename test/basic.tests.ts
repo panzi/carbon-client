@@ -400,7 +400,12 @@ describe('Write Metrics', () => {
         const server = createDgramSocket('udp4');
         try {
             await bind(server, port, 'localhost')
-            const client = new CarbonClient('localhost', port, 'UDP');
+            const client = new CarbonClient({
+                address: 'localhost',
+                port,
+                transport: 'UDP',
+                family: 4,
+            });
 
             await doTests(client, () => receiveMessage(server));
         } finally {
