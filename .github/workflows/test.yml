@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  push:
+    branches:
+    - main
+    - develop
+
+  pull_request:
+    branches:
+    - main
+    - develop
+
+jobs:
+  tests:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v2
+
+    - name: Install Packages
+      run: |
+        npm ci
+
+    - name: Run Tests
+      run: |
+        npm run test
