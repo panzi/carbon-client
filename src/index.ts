@@ -23,6 +23,7 @@ export interface CarbonClientOptions {
     port?: number;
     autoReconnect?: boolean;
     transport?: Transport;
+    sendBufferSize?: number;
 }
 
 export type MetricTuple =
@@ -57,6 +58,7 @@ export class CarbonClient {
     readonly address: string;
     readonly port: number;
     readonly transport: Transport;
+    readonly sendBufferSize?: number;
     autoReconnect: boolean;
 
     private socket: NetSocket|DgramSocket|null = null;
@@ -77,6 +79,9 @@ export class CarbonClient {
             this.port          = arg1.port ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
             this.transport     = transport;
             this.autoReconnect = arg1.autoReconnect ?? false;
+            if (transport === 'UDP') {
+                this.sendBufferSize = arg1.sendBufferSize;
+            }
         } else {
             this.address = arg1;
             if (arg2 === 'IPC') {
@@ -152,7 +157,10 @@ export class CarbonClient {
                 throw new Error(`host not found: ${this.address}`);
             }
             address = adr.address;
-            this.socket = createDgramSocket(adr.family === 6 ? 'udp6' : 'udp4');
+            this.socket = createDgramSocket({
+                type: adr.family === 6 ? 'udp6' : 'udp4',
+                sendBufferSize: this.sendBufferSize,
+            });
 
             this.socket.on('close', () => this._onClose(false));
         }
