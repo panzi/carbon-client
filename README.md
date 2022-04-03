@@ -3,7 +3,8 @@ Carbon Client
 
 [![Test Status](https://img.shields.io/github/workflow/status/panzi/carbon-client/Tests)](https://github.com/panzi/carbon-client/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/github/license/panzi/carbon-client)](https://github.com/panzi/carbon-client/blob/main/LICENSE)
-[Documentation](https://carbon-client.github.io/)
+[Documentation](https://panzi.github.io/carbon-client)
+[GitHub](https://github.com/panzi/carbon-client/)
 
 Simple [Graphite](https://graphiteapp.org/) [Carbon](https://github.com/graphite-project/carbon)
 client for ingesting metrics in TypeScript for NodeJS.

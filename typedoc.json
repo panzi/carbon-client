@@ -1,4 +1,5 @@
 {
     "name": "Carbon Client",
-    "excludePrivate": true
+    "excludePrivate": true,
+    "gitRevision": "main"
 }
