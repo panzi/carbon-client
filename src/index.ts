@@ -483,6 +483,10 @@ export class CarbonClient {
     on(event: 'connect', callback: () => void): void;
     on(event: 'error', callback: (error: Error) => void): void;
     on(event: 'close', callback: (hadError: boolean) => void): void;
+    /**
+     * @ignore
+     */
+    on<Event extends keyof EventMap>(event: Event, callback: EventMap[Event]): void;
 
     /**
      * Register an event handler.
@@ -505,6 +509,10 @@ export class CarbonClient {
     once(event: 'connect', callback: () => void): void;
     once(event: 'error', callback: (error: Error) => void): void;
     once(event: 'close', callback: (hadError: boolean) => void): void;
+    /**
+     * @ignore
+     */
+    once<Event extends keyof EventMap>(event: Event, callback: EventMap[Event]): void;
 
     /**
      * Register an event handler that is only called once.
@@ -524,6 +532,10 @@ export class CarbonClient {
     off(event: 'connect', callback: () => void): void;
     off(event: 'error', callback: (error: Error) => void): void;
     off(event: 'close', callback: (hadError: boolean) => void): void;
+    /**
+     * @ignore
+     */
+    off<Event extends keyof EventMap>(event: Event, callback: EventMap[Event]): void;
 
     /**
      * Remove an event handler.
