@@ -2,7 +2,8 @@ Carbon Client
 =============
 
 [![Test Status](https://img.shields.io/github/workflow/status/panzi/carbon-client/Tests)](https://github.com/panzi/carbon-client/actions/workflows/tests.yml)
-[![License](https://img.shields.io/github/license/panzi/carbon-client)](https://github.com/panzi/carbon-client/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/github/license/panzi/carbon-client)](https://github.com/panzi/carbon-client/blob/main/LICENSE)
+[Documentation](https://carbon-client.github.io/)
 
 Simple [Graphite](https://graphiteapp.org/) [Carbon](https://github.com/graphite-project/carbon)
 client for ingesting metrics in TypeScript for NodeJS.
@@ -52,7 +53,7 @@ await client.batchWrite({
 await client.disconnect();
 ```
 
-If you use UDP keep batch sizes small enough to fit in one UDP packet!
+If you use UDP keep batch sizes small enough to fit into one UDP packet!
 
 Instead of `write()`/`batchWrite()` you can also use `vwrite()`/`vbatchWrite()`
 which won't return promises (v for void), but instead if they encounter an error
@@ -62,5 +63,5 @@ handlers.
 TODO
 ----
 
-* [ ] Propper API reference.
+* [x] Propper API reference.
 * [ ] NPM package.

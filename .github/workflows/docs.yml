@@ -4,12 +4,6 @@ on:
   push:
     branches:
     - main
-    - develop
-
-  pull_request:
-    branches:
-    - main
-    - develop
 
 jobs:
   tests:
@@ -28,8 +22,15 @@ jobs:
 
     - name: Install dependencies (if the cached directory was not found)
       if: steps.node-cache.outputs.cache-hit != 'true'
-      run: npm ci
-
-    - name: Run Tests
       run: |
-        npm run test
+        npm ci
+
+    - name: Build Docs
+      run: |
+        npm run build:doc
+
+    - name: Deploy Docs to GH-Pages
+      uses: JamesIves/github-pages-deploy-action@4.1.4
+      with:
+        branch: gh-pages
+        folder: docs
