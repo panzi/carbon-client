@@ -50,6 +50,8 @@ export interface CarbonClientOptions {
     /**
      * Automatically connect on write if not connected. Defaults to
      * `false`.
+     * 
+     * @see [[CarbonClient.autoConnect]]
      */
     autoConnect?: boolean;
 
@@ -66,9 +68,7 @@ export interface CarbonClientOptions {
     /**
      * For TCP and UDP the IP address family to use.
      * 
-     * If not given it will be auto-detected. For UDP if there are IPv6 and IPv4
-     * addresses of a hostname the IPv6 address will be preferred. Explicitely
-     * pass `4` if you do not want this.
+     * @see [[CarbonClient.family]]
      */
     family?: 4 | 6;
 }
@@ -195,7 +195,7 @@ export class CarbonClient {
     readonly address: string;
 
     /**
-     * Server port to connect to. Will be `-1` if `transport` is `'IPC'`.
+     * Server port to connect to. Will be `-1` if [[CarbonClient.transport]] is `'IPC'`.
      */
     readonly port: number;
 
@@ -220,6 +220,9 @@ export class CarbonClient {
 
     /**
      * Automatically connect on write if not connected.
+     * 
+     * Also if `ture` then calls of [[CarbonClient.connect]] when connected and
+     * calls of [[CarbonClient.disconnect]] when not connected are not errors.
      */
     autoConnect: boolean;
 
