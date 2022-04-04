@@ -4,4 +4,9 @@
 .github
 /tmp
 /docs
+/src
+tsconfig.json
+typedoc.json
+/test
+jest.config.js
 *.tgz

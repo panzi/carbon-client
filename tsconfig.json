@@ -13,6 +13,7 @@
       "sourceMap": true,
       "outDir": "./build",
       "allowJs": true,
+      "declaration": true,
       "noEmit": false,
       "esModuleInterop": true,
       "strictNullChecks": true,
