@@ -18,15 +18,7 @@ those aren&#39;t supported by Carbon.</p>
 </code></pre>
 <p>If you use UDP keep batch sizes small enough to fit into one UDP packet!</p>
 <p>Instead of <code>write()</code>/<code>batchWrite()</code> you can also use <code>vwrite()</code>/<code>vbatchWrite()</code>
-which won&#39;t return promises (v for void), but instead if they encounter an error
-during sending they will dispatch that error to any registered error event
-handlers.</p>
-
-<a href="#todo" id="todo" style="color: inherit; text-decoration: none;">
-  <h2>TODO</h2>
-</a>
-<ul>
-<li><input checked="" disabled="" type="checkbox"> Propper API reference.</li>
-<li><input disabled="" type="checkbox"> NPM package.</li>
-</ul>
+which won&#39;t return promises (v for <code>void</code>), but instead if an error is
+encountered during sending the error will be dispatched to any registered error
+event handlers.</p>
 </div></div><div class="col-4 col-menu menu-sticky-wrap menu-highlight"><nav class="tsd-navigation primary"><ul><li class="current"><a href="modules.html">Exports</a></li></ul></nav><nav class="tsd-navigation secondary menu-sticky"><ul><li class="tsd-kind-class"><a href="classes/CarbonClient.html" class="tsd-kind-icon">Carbon<wbr/>Client</a></li><li class="tsd-kind-interface"><a href="interfaces/CarbonClientOptions.html" class="tsd-kind-icon">Carbon<wbr/>Client<wbr/>Options</a></li><li class="tsd-kind-interface"><a href="interfaces/Tags.html" class="tsd-kind-icon">Tags</a></li><li class="tsd-kind-type-alias"><a href="modules.html#IPTransport" class="tsd-kind-icon">IPTransport</a></li><li class="tsd-kind-type-alias"><a href="modules.html#MetricMap" class="tsd-kind-icon">Metric<wbr/>Map</a></li><li class="tsd-kind-type-alias"><a href="modules.html#MetricParams" class="tsd-kind-icon">Metric<wbr/>Params</a></li><li class="tsd-kind-type-alias"><a href="modules.html#MetricTuple" class="tsd-kind-icon">Metric<wbr/>Tuple</a></li><li class="tsd-kind-type-alias"><a href="modules.html#Transport" class="tsd-kind-icon">Transport</a></li><li class="tsd-kind-variable"><a href="modules.html#DEFAULT_PORT" class="tsd-kind-icon">DEFAULT_<wbr/>PORT</a></li><li class="tsd-kind-variable"><a href="modules.html#DEFAULT_TRANSPORT" class="tsd-kind-icon">DEFAULT_<wbr/>TRANSPORT</a></li></ul></nav></div></div></div><footer class="with-border-bottom"><div class="container"><h2>Legend</h2><div class="tsd-legend-group"><ul class="tsd-legend"><li class="tsd-kind-constructor tsd-parent-kind-class"><span class="tsd-kind-icon">Constructor</span></li><li class="tsd-kind-property tsd-parent-kind-class"><span class="tsd-kind-icon">Property</span></li><li class="tsd-kind-method tsd-parent-kind-class"><span class="tsd-kind-icon">Method</span></li></ul><ul class="tsd-legend"><li class="tsd-kind-property tsd-parent-kind-interface"><span class="tsd-kind-icon">Property</span></li></ul></div><h2>Settings</h2><p>Theme <select id="theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></p></div></footer><div class="container tsd-generator"><p>Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></div><div class="overlay"></div><script src="assets/main.js"></script></body></html>
