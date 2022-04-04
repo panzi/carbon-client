@@ -1,5 +1,5 @@
 {
-  "name": "carbon-client",
+  "name": "@panzi/carbon-client",
   "version": "1.0.0",
   "description": "Simple Graphite Carbon client for ingesting metrics in TypeScript for NodeJS.",
   "main": "./build/index.js",
