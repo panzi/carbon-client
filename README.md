@@ -57,12 +57,6 @@ await client.disconnect();
 If you use UDP keep batch sizes small enough to fit into one UDP packet!
 
 Instead of `write()`/`batchWrite()` you can also use `vwrite()`/`vbatchWrite()`
-which won't return promises (v for void), but instead if they encounter an error
-during sending they will dispatch that error to any registered error event
-handlers.
-
-TODO
-----
-
-* [x] Propper API reference.
-* [ ] NPM package.
+which won't return promises (v for `void`), but instead if an error is
+encountered during sending the error will be dispatched to any registered error
+event handlers.

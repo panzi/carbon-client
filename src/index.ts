@@ -74,24 +74,24 @@ export interface CarbonClientOptions {
 }
 
 /**
- * See [[CarbonClient.batchWrite]] and [[CarbonClient.vbatchWrite]].
+ * @see [[CarbonClient.batchWrite]] and [[CarbonClient.vbatchWrite]].
  */
 export type MetricTuple =
     [path: string, value: number, timestamp: Date, tags?: Tags] |
     [path: string, value: number, tags?: Tags];
 
 /**
- * See [[CarbonClient.batchWrite]] and [[CarbonClient.vbatchWrite]].
+ * @see [[CarbonClient.batchWrite]] and [[CarbonClient.vbatchWrite]].
  */
 export type MetricParams = { value: number, timestamp?: Date, tags?: Tags };
 
 /**
- * See [[CarbonClient.batchWrite]] and [[CarbonClient.vbatchWrite]].
+ * @see [[CarbonClient.batchWrite]] and [[CarbonClient.vbatchWrite]].
  */
 export type MetricMap = { [path: string]: number|MetricParams };
 
 /**
- * Tag key-value map.
+ * Tags key-value map.
  * 
  * @see [[CarbonClient]] for allowed tag names and values.
  */
