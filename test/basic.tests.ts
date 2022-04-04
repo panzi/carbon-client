@@ -1,11 +1,10 @@
-import { describe, it, expect, test, beforeAll } from '@jest/globals';
+import { describe, expect, test, beforeAll } from '@jest/globals';
 import { Socket as NetSocket, Server } from 'net';
 import { Socket as DgramSocket, createSocket as createDgramSocket } from 'dgram';
 import MockDate from 'mockdate';
-import { CarbonClient, CarbonClientOptions, DEFAULT_PORT, DEFAULT_TRANSPORT, IPTransport, MetricMap, MetricParams, MetricTuple } from '../src';
+import { CarbonClient, EventMap, DEFAULT_PORT, DEFAULT_TRANSPORT, IPTransport, MetricMap, MetricParams, MetricTuple } from '../src';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
-import { createWriteStream, WriteStream } from 'fs';
 import * as fs from 'fs/promises';
 
 const DATE_TIME_0_STR = '2022-04-01T00:00:00+0200';
@@ -13,103 +12,13 @@ const DATE_TIME_1_STR = '2022-04-01T01:00:00+0200';
 const DATE_TIME_2_STR = '2022-04-01T02:00:00+0200';
 const MOCK_DATE_TIME = new Date(DATE_TIME_0_STR);
 
-beforeAll(() => {
-    MockDate.set(MOCK_DATE_TIME);
-});
-
-afterAll(() => {
-    MockDate.reset();
-});
-
-describe('Initialize Client', () => {
-    const host = 'localhost';
-    const port = 3004;
-
-    test('defaults', () => {
-        for (const autoReconnect of [true, false]) {
-            let client = autoReconnect ?
-                new CarbonClient(host, port, undefined, autoReconnect) :
-                new CarbonClient(host);
-
-            expect(client.address).toBe(host);
-            expect(client.port).toBe(autoReconnect ? port : DEFAULT_PORT);
-            expect(client.transport).toBe(DEFAULT_TRANSPORT);
-            expect(client.autoReconnect).toBe(autoReconnect);
-
-            client = autoReconnect ?
-                new CarbonClient({
-                    address: host,
-                    // default port
-                    autoReconnect,
-                }) :
-                new CarbonClient({
-                    address: host,
-                    port,
-                    // default autoReconnect
-                });
-
-            expect(client.address).toBe(host);
-            expect(client.port).toBe(autoReconnect ? DEFAULT_PORT : port);
-            expect(client.transport).toBe(DEFAULT_TRANSPORT);
-            expect(client.autoReconnect).toBe(autoReconnect);
-        }
-    });
-
-    for (const transport of ['TCP', 'UDP'] as IPTransport[]) {
-        test(transport, () => {
-            for (const autoReconnect of [true, false]) {
-                let client = new CarbonClient(host, port, transport, autoReconnect);
-
-                expect(client.address).toBe(host);
-                expect(client.port).toBe(port);
-                expect(client.transport).toBe(transport);
-                expect(client.autoReconnect).toBe(autoReconnect);
-
-                client = new CarbonClient({
-                    address: host,
-                    port,
-                    autoReconnect,
-                    transport,
-                });
-
-                expect(client.address).toBe(host);
-                expect(client.port).toBe(port);
-                expect(client.transport).toBe(transport);
-                expect(client.autoReconnect).toBe(autoReconnect);
-            }
-        });
-    }
-
-    test('IPC', () => {
-        const path = '/tmp/namedpipe';
-        for (const autoReconnect of [true, false]) {
-            let client = new CarbonClient(path, 'IPC', autoReconnect);
-
-            expect(client.address).toBe(path);
-            expect(client.port).toBe(-1);
-            expect(client.transport).toBe('IPC');
-            expect(client.autoReconnect).toBe(autoReconnect);
-
-            client = new CarbonClient({
-                address: path,
-                autoReconnect,
-                transport: 'IPC',
-            });
-
-            expect(client.address).toBe(path);
-            expect(client.port).toBe(-1);
-            expect(client.transport).toBe('IPC');
-            expect(client.autoReconnect).toBe(autoReconnect);
-        }
-    });
-});
-
 function receive(server: Server): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
         server.once('error', reject);
 
         server.once('connection', socket => {
             const buf: Buffer[] = [];
+            let finished = false;
 
             socket.on('data', data => {
                 buf.push(data);
@@ -117,6 +26,7 @@ function receive(server: Server): Promise<Buffer> {
 
             const onerror = (error: Error) => {
                 reject(error);
+                finished = true;
                 if (!socket.destroyed) {
                     socket.destroy(error);
                 }
@@ -124,10 +34,20 @@ function receive(server: Server): Promise<Buffer> {
 
             socket.once('end', () => {
                 resolve(Buffer.concat(buf));
+                finished = true;
                 server.off('error', reject);
                 socket.off('error', onerror);
                 if (!socket.destroyed) {
                     socket.destroy();
+                }
+            });
+
+            socket.once('close', () => {
+                if (!finished) {
+                    server.off('error', reject);
+                    socket.off('error', onerror);
+                    reject(new Error('connection closed before end event'));
+                    finished = true;
                 }
             });
 
@@ -171,14 +91,13 @@ function expectEvent(client: CarbonClient, event: 'connect'|'close'|'error'): ()
     };
 }
 
-function waitEvent(client: CarbonClient, event: 'connect'|'close'|'error'): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-        const handler = () => {
-            client.off(event, handler);
-            resolve();
-        };
+type Arg0<F extends Function> =
+    F extends (arg0: infer T) => unknown ? T :
+    F extends () => unknown ? void : never;
 
-        client.on(event, handler);
+function waitEvent<Event extends keyof EventMap>(client: CarbonClient, event: Event): Promise<Arg0<EventMap[Event]>> {
+    return new Promise<Arg0<EventMap[Event]>>((resolve, reject) => {
+        client.once(event, resolve as any); // XXX: don't know why type check fails here
     });
 }
 
@@ -204,10 +123,6 @@ function listenTCP(server: Server, port: number, host?: string): Promise<void> {
     });
 }
 
-function isNodeError<T extends ErrorConstructor>(error: unknown, errorType: T): error is InstanceType<T> & NodeJS.ErrnoException {
-    return error instanceof errorType;
-}
-
 async function unlinkIfExists(path: string): Promise<void> {
     try {
         await fs.unlink(path);
@@ -219,10 +134,275 @@ async function unlinkIfExists(path: string): Promise<void> {
     }
 }
 
+function unixTime(isoDatetime: string): number {
+    const ms = new Date(isoDatetime).getTime();
+    if (isNaN(ms)) {
+        throw new TypeError(`illegal ISO data-time string: ${JSON.stringify(isoDatetime)}`);
+    }
+    return ms / 1000;
+}
+
+function bind(socket: DgramSocket, port: number, host?: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        socket.once('error', reject);
+
+        socket.bind(port, host, () => {
+            socket.off('error', reject);
+            resolve();
+        });
+    });
+}
+
+function receiveMessage(socket: DgramSocket): Promise<Buffer> {
+    return new Promise<Buffer>((resolve, reject) => {
+        const onmessage = (data: Buffer) => {
+            resolve(data);
+            socket.off('error', reject);
+            socket.off('message', onmessage);
+        };
+
+        socket.on('error', reject);
+        socket.on('message', onmessage);
+    });
+}
+
+beforeAll(() => {
+    MockDate.set(MOCK_DATE_TIME);
+});
+
+afterAll(() => {
+    MockDate.reset();
+});
+
+describe('Initialize Client', () => {
+    const host = 'localhost';
+    const port = 3004;
+
+    test('Defaults', () => {
+        for (const autoConnect of [true, false]) {
+            let client = autoConnect ?
+                new CarbonClient(host, port, undefined, autoConnect) :
+                new CarbonClient(host);
+
+            expect(client.address).toBe(host);
+            expect(client.port).toBe(autoConnect ? port : DEFAULT_PORT);
+            expect(client.transport).toBe(DEFAULT_TRANSPORT);
+            expect(client.autoConnect).toBe(autoConnect);
+
+            client = autoConnect ?
+                new CarbonClient({
+                    address: host,
+                    // default port
+                    autoConnect,
+                }) :
+                new CarbonClient({
+                    address: host,
+                    port,
+                    // default autoConnect
+                });
+
+            expect(client.address).toBe(host);
+            expect(client.port).toBe(autoConnect ? DEFAULT_PORT : port);
+            expect(client.transport).toBe(DEFAULT_TRANSPORT);
+            expect(client.autoConnect).toBe(autoConnect);
+        }
+    });
+
+    for (const transport of ['TCP', 'UDP'] as IPTransport[]) {
+        test(transport, () => {
+            for (const autoConnect of [true, false]) {
+                let client = new CarbonClient(host, port, transport, autoConnect);
+
+                expect(client.address).toBe(host);
+                expect(client.port).toBe(port);
+                expect(client.transport).toBe(transport);
+                expect(client.autoConnect).toBe(autoConnect);
+
+                client = new CarbonClient({
+                    address: host,
+                    port,
+                    autoConnect,
+                    transport,
+                });
+
+                expect(client.address).toBe(host);
+                expect(client.port).toBe(port);
+                expect(client.transport).toBe(transport);
+                expect(client.autoConnect).toBe(autoConnect);
+            }
+        });
+    }
+
+    test('IPC', () => {
+        const path = '/tmp/namedpipe';
+        for (const autoConnect of [true, false]) {
+            let client = new CarbonClient(path, 'IPC', autoConnect);
+
+            expect(client.address).toBe(path);
+            expect(client.port).toBe(-1);
+            expect(client.transport).toBe('IPC');
+            expect(client.autoConnect).toBe(autoConnect);
+
+            client = new CarbonClient({
+                address: path,
+                autoConnect,
+                transport: 'IPC',
+            });
+
+            expect(client.address).toBe(path);
+            expect(client.port).toBe(-1);
+            expect(client.transport).toBe('IPC');
+            expect(client.autoConnect).toBe(autoConnect);
+        }
+    });
+});
+
+describe('Illegal Values', () => {
+    const port = 2222;
+
+    const controlChars = [
+        '\0', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07', '\x0C',
+        '\x0E', '\x0F', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16',
+        '\x17', '\x18', '\x19', '\x1A', '\x1B', '\x1C', '\x1D', '\x1E', '\x1F',
+        '\x7f',
+    ]
+
+    const illegalPaths = [
+        '',
+        '.foo',
+        'foo.',
+        'foo..bar',
+        ' ', '\n', '/', '\\', '\t', '\r', '\v', '\t', '!', '?', '*', '%', '%a', '%zz',
+        '(', ')', '[', ']', '{', '}', '<', '>', '|', '"', "'", '^', '~', ',', ':', ';',
+        '=', '`', '#', 'Ä',
+        ...controlChars,
+    ];
+
+    const illegalTagValues = [
+        '',
+        '%', '%a', '%zz', ';', '"', "'", '~',
+        ...controlChars,
+    ];
+
+    const illegalPorts = [
+        0,
+        -0.1,
+        -2003,
+        1.01,
+        NaN,
+        Infinity,
+        -Infinity,
+        65_536,
+    ];
+
+    test('Illegal Ports', () => {
+        for (const illegalPort of illegalPorts) {
+            expect(() => new CarbonClient('localhost', illegalPort)).toThrow(`illegal port number: ${illegalPort}`);
+        }
+    });
+
+    test('Illegal Paths', async () => {
+        const client = new CarbonClient('localhost', port, 'UDP', true);
+
+        try {
+            for (const illegalPath of illegalPaths) {
+                await expect(client.write(illegalPath, -1)).rejects.toMatchObject({
+                    message: `illegal path: ${JSON.stringify(illegalPath)}`
+                });
+
+                await expect(client.batchWrite([[illegalPath, -1]])).rejects.toMatchObject({
+                    message: `illegal path: ${JSON.stringify(illegalPath)}`
+                });
+
+                await expect(client.batchWrite({ [illegalPath]: -1 })).rejects.toMatchObject({
+                    message: `illegal path: ${JSON.stringify(illegalPath)}`
+                });
+            }
+        } finally {
+            await client.disconnect();
+        }
+    });
+
+    test('Illegal Dates', async () => {
+        const client = new CarbonClient('localhost', port, 'UDP', true);
+        const invalidDate = new Date('Invalid Date');
+
+        try {
+            await expect(client.write('a', -1, invalidDate)).rejects.toMatchObject({
+                message: `illegal date: Invalid Date`
+            });
+
+            await expect(client.batchWrite([], invalidDate)).rejects.toMatchObject({
+                message: `illegal date: Invalid Date`
+            });
+
+            await expect(client.batchWrite([['a', -1, invalidDate]])).rejects.toMatchObject({
+                message: `illegal date: Invalid Date`
+            });
+
+            await expect(client.batchWrite({ a: { value: -1, timestamp: invalidDate } })).rejects.toMatchObject({
+                message: `illegal date: Invalid Date`
+            });
+        } finally {
+            await client.disconnect();
+        }
+    });
+
+    test('Illegal Tag Names', async () => {
+        const client = new CarbonClient('localhost', port, 'UDP', true);
+
+        try {
+            for (const illegalPath of illegalPaths) {
+                const tags = {
+                    [illegalPath]: 'a'
+                };
+                await expect(client.write('a', -1, tags)).rejects.toMatchObject({
+                    message: `illegal tag name: ${JSON.stringify(illegalPath)}`
+                });
+
+                await expect(client.batchWrite([['a', -1, tags]])).rejects.toMatchObject({
+                    message: `illegal tag name: ${JSON.stringify(illegalPath)}`
+                });
+
+                await expect(client.batchWrite({ a: { value: -1, tags } })).rejects.toMatchObject({
+                    message: `illegal tag name: ${JSON.stringify(illegalPath)}`
+                });
+            }
+        } finally {
+            await client.disconnect();
+        }
+    });
+
+
+    test('Illegal Tag Values', async () => {
+        const client = new CarbonClient('localhost', port, 'UDP', true);
+
+        try {
+            for (const illegalTagValue of illegalTagValues) {
+                const tags = {
+                    a: illegalTagValue
+                };
+                await expect(client.write('a', -1, tags)).rejects.toMatchObject({
+                    message: `illegal tag value: a=${JSON.stringify(illegalTagValue)}`
+                });
+
+                await expect(client.batchWrite([['a', -1, tags]])).rejects.toMatchObject({
+                    message: `illegal tag value: a=${JSON.stringify(illegalTagValue)}`
+                });
+
+                await expect(client.batchWrite({ a: { value: -1, tags } })).rejects.toMatchObject({
+                    message: `illegal tag value: a=${JSON.stringify(illegalTagValue)}`
+                });
+            }
+        } finally {
+            await client.disconnect();
+        }
+    });
+});
+
 describe('Connect', () => {
     const port = 2222;
     const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.connect.pipe`);
-    const file = resolve(tmpdir(), `carbon-client.test.${process.pid}.connect.file`);
 
     test('TCP', async () => {
         const server = new Server();
@@ -278,47 +458,19 @@ describe('Connect', () => {
     });
 });
 
-function unixTime(isoDatetime: string): number {
-    const ms = new Date(isoDatetime).getTime();
-    if (isNaN(ms)) {
-        throw new TypeError(`illegal ISO data-time string: ${JSON.stringify(isoDatetime)}`);
-    }
-    return ms / 1000;
-}
-
-function bind(socket: DgramSocket, port: number, host?: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-        socket.once('error', reject);
-
-        socket.bind(port, host, () => {
-            socket.off('error', reject);
-            resolve();
-        });
-    });
-}
-
-function receiveMessage(socket: DgramSocket): Promise<Buffer> {
-    return new Promise<Buffer>((resolve, reject) => {
-        const onmessage = (data: Buffer) => {
-            resolve(data);
-            socket.off('error', reject);
-            socket.off('message', onmessage);
-        };
-
-        socket.on('error', reject);
-        socket.on('message', onmessage);
-    });
-}
-
 describe('Write Metrics', () => {
     const port = 2222;
     const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.write.pipe`);
-    const file = resolve(tmpdir(), `carbon-client.test.${process.pid}.write.file`);
+
+    const tagValue = 'tag.value-+@$_.*:,&#|<>[](){}=!?^/\\%12%0A%0f';
 
     const metrics: MetricTuple[] = [
-        ['host.server.key1', +123.456, new Date(DATE_TIME_1_STR), { 'tag.name': 'tag.value' }],
-        ['host.server.key2', -123.456, new Date(DATE_TIME_2_STR)],
-        ['host.server.key3', Infinity],
+        ['host.server.key1', +123.456, new Date(DATE_TIME_1_STR), { 'tag.name': tagValue }],
+        ['host.server.key-', -123.456, new Date(DATE_TIME_2_STR)],
+        ['host.server.key+', Infinity],
+        ['host.server.key$', -Infinity],
+        ['host.server.key@', NaN],
+        ['host.server.%20_', 1.5e100],
     ];
 
     const metricsMap: MetricMap = metrics.reduce((map: MetricMap, metric) => {
@@ -348,9 +500,12 @@ describe('Write Metrics', () => {
     }, {});
 
     const expectedLines = [
-        `host.server.key1;tag.name=tag.value 123.456 ${unixTime(DATE_TIME_1_STR)}\n`,
-        `host.server.key2 -123.456 ${unixTime(DATE_TIME_2_STR)}\n`,
-        `host.server.key3 Infinity ${unixTime(DATE_TIME_0_STR)}\n`,
+        `host.server.key1;tag.name=${tagValue} 123.456 ${unixTime(DATE_TIME_1_STR)}\n`,
+        `host.server.key- -123.456 ${unixTime(DATE_TIME_2_STR)}\n`,
+        `host.server.key+ Infinity ${unixTime(DATE_TIME_0_STR)}\n`,
+        `host.server.key$ -Infinity ${unixTime(DATE_TIME_0_STR)}\n`,
+        `host.server.key@ NaN ${unixTime(DATE_TIME_0_STR)}\n`,
+        `host.server.%20_ 1.5e+100 ${unixTime(DATE_TIME_0_STR)}\n`,
     ];
 
     const expectedBatch = expectedLines.join('');
@@ -426,5 +581,281 @@ describe('Write Metrics', () => {
             }
             await unlinkIfExists(pipe);
         }
+    });
+});
+
+describe('Write/Disconnect While Not Connected', () => {
+    const port = 2222;
+    const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.not-connected.pipe`);
+
+    async function doTest(client: CarbonClient): Promise<void> {
+        await expect(client.write('a.b.c', 1)).rejects.toMatchObject({ message: 'not connected' });
+        await expect(client.batchWrite([])).rejects.toMatchObject({ message: 'not connected' });
+        await expect(client.disconnect()).rejects.toMatchObject({ message: 'not connected' });
+        await expect(new Promise<void>((resolve, reject) => {
+            const res = client.disconnect(error => error ? reject(error) : resolve());
+            if (res !== undefined) {
+                reject(new Error(`disconenct did't return undefined but: ${res}`));
+            }
+        })).rejects.toMatchObject({ message: 'not connected' });
+    }
+
+    test('TCP', async () => {
+        const client = new CarbonClient('localhost', port, 'TCP');
+        await doTest(client);
+    });
+
+    test('UDP', async () => {
+        const client = new CarbonClient({
+            address: 'localhost',
+            port,
+            transport: 'UDP',
+            family: 4,
+        });
+        await doTest(client);
+    });
+
+    test('IPC', async () => {
+        const client = new CarbonClient(pipe, 'IPC');
+        await doTest(client);
+    });
+});
+
+describe('Server Offline', () => {
+    const port = 2222;
+    const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.no-server.pipe`);
+
+    test('TCP', async () => {
+        const client = new CarbonClient('localhost', port, 'TCP');
+        await expect(client.connect()).rejects.toMatchObject({
+            code: 'ECONNREFUSED'
+        });
+    });
+
+    // UDP can of course not detect a missing server
+
+    test('IPC', async () => {
+        const client = new CarbonClient(pipe, 'IPC');
+        await expect(client.connect()).rejects.toMatchObject({
+            code: 'ENOENT'
+        });
+
+        await fs.writeFile(pipe, '');
+        try {
+            await expect(client.connect()).rejects.toMatchObject({
+                code: 'ECONNREFUSED'
+            });
+        } finally {
+            await unlinkIfExists(pipe);
+        }
+    });
+});
+
+describe('Server Disconnect', () => {
+    const port = 2222;
+    const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.server-disconnect.pipe`);
+
+    async function doTests(client: CarbonClient, createServer: () => Promise<Server>): Promise<void> {
+        {
+            const server = await createServer();
+            try {
+                const connections: NetSocket[] = [];
+                let running = true;
+                server.on('connection', connection => {
+                    if (running) {
+                        connections.push(connection);
+                    } else {
+                        connection.destroy();
+                    }
+                });
+
+                const willClose = waitEvent(client, 'close');
+                await client.connect();
+                running = false;
+                for (const connection of connections) {
+                    connection.destroy();
+                }
+                await close(server);
+                await expect(willClose).resolves.toStrictEqual(false);
+            } finally {
+                if (server.listening) {
+                    await close(server);
+                }
+            }
+        }
+        {
+            const server = await createServer();
+            try {
+                const connections: NetSocket[] = [];
+                let running = true;
+                server.on('connection', connection => {
+                    if (running) {
+                        connections.push(connection);
+                    } else {
+                        connection.destroy();
+                    }
+                });
+
+                const willClose = waitEvent(client, 'close');
+                await client.connect();
+                await client.write('a.b.c', 1);
+                running = false;
+                for (const connection of connections) {
+                    connection.destroy();
+                }
+                await close(server);
+                await expect(willClose).resolves.toStrictEqual(true);
+            } finally {
+                if (server.listening) {
+                    await close(server);
+                }
+            }
+        }
+    }
+
+    test('TCP', async () => {
+        const client = new CarbonClient('localhost', port, 'TCP');
+
+        await doTests(client, async () => {
+            const server = new Server();
+            await listenTCP(server, port, 'localhost');
+            return server;
+        });
+    });
+
+    test('IPC', async () => {
+        const client = new CarbonClient(pipe, 'IPC');
+
+        await doTests(client, async () => {
+            const server = new Server();
+            await listenIPC(server, pipe);
+            return server;
+        });
+    });
+});
+
+describe('Auto-Connect', () => {
+    const port = 2222;
+    const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.write.pipe`);
+
+    const metric: MetricTuple = ['host.server.key1', +123.456, new Date(DATE_TIME_1_STR), { 'tag.name': 'tag.value' }];
+    const expectedLine = `host.server.key1;tag.name=tag.value 123.456 ${unixTime(DATE_TIME_1_STR)}\n`;
+
+    async function doTests(client: CarbonClient, receive: () => Promise<Buffer>): Promise<void> {
+        const promise = receive();
+        const whenClosed = waitEvent(client, 'close');
+
+        await client.write(metric[0], metric[1], metric[2] as Date, metric[3]);
+        await client.disconnect();
+        expect((await promise).toString()).toStrictEqual(expectedLine);
+        await whenClosed;
+    }
+    
+    async function doReconnectTests(client: CarbonClient, createServer: () => Promise<Server>): Promise<void> {
+        let server = await createServer();
+        try {
+            let whenClosed = waitEvent(client, 'close');
+
+            const connections: NetSocket[] = [];
+            server.on('connection', connection => {
+                connections.push(connection);
+            });
+
+            await client.connect();
+            for (const connection of connections) {
+                connection.destroy();
+            }
+            await whenClosed;
+            const promise = receive(server);
+            whenClosed = waitEvent(client, 'close');
+
+            await client.write(metric[0], metric[1], metric[2] as Date, metric[3]);
+            await client.disconnect();
+            expect((await promise).toString()).toStrictEqual(expectedLine);
+            await whenClosed;
+        } finally {
+            if (server.listening) {
+                await close(server);
+            }
+        }
+    }
+
+    test('TCP', async () => {
+        {
+            const client = new CarbonClient('localhost', port, 'TCP', true);
+            const server = new Server();
+            try {
+                await listenTCP(server, port, 'localhost');
+
+                await doTests(client, () => receive(server));
+            } finally {
+                if (server.listening) {
+                    await close(server);
+                }
+            }
+        }
+
+        const client = new CarbonClient('localhost', port, 'TCP', true);
+        await doReconnectTests(client, async () => {
+            const server = new Server();
+            await listenTCP(server, port, 'localhost');
+            return server;
+        });
+    });
+
+    test('UDP', async () => {
+        {
+            const client = new CarbonClient({
+                address: 'localhost',
+                port,
+                transport: 'UDP',
+                family: 4,
+                autoConnect: true,
+            });
+            const server = createDgramSocket('udp4');
+            try {
+                await bind(server, port, 'localhost')
+
+                await doTests(client, () => receiveMessage(server));
+            } finally {
+                await close(server);
+            }
+        }
+
+        // disconnecting unconnected client is allowed if autoConnect is true
+        const client = new CarbonClient({
+            address: 'localhost',
+            port,
+            transport: 'UDP',
+            family: 4,
+            autoConnect: true,
+        });
+        await client.disconnect();
+
+        // UDP cannot connect server disconnect (because there's no such concept)
+    });
+
+    test('IPC', async () => {
+        {
+            const client = new CarbonClient(pipe, 'IPC', true);
+            const server = new Server();
+            try {
+                await listenIPC(server, pipe);
+
+                await doTests(client, () => receive(server));
+            } finally {
+                if (server.listening) {
+                    await close(server);
+                }
+                await unlinkIfExists(pipe);
+            }
+        }
+
+        const client = new CarbonClient(pipe, 'IPC', true);
+        await doReconnectTests(client, async () => {
+            const server = new Server();
+            await listenIPC(server, pipe);
+            return server;
+        });
     });
 });

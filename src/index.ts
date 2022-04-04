@@ -2,7 +2,10 @@ import { Socket as NetSocket } from 'net';
 import { Socket as DgramSocket, createSocket as createDgramSocket } from 'dgram';
 import * as dns from 'dns/promises';
 
-type EventMap = {
+/**
+ * @ignore
+ */
+export type EventMap = {
     connect: (this: CarbonClient) => void,
     error: (this: CarbonClient, error: Error) => void,
     close: (this: CarbonClient, hadError: boolean) => void,
@@ -45,10 +48,10 @@ export interface CarbonClientOptions {
     port?: number;
 
     /**
-     * Automatically re-connect if connection closes with an error. Defaults to
+     * Automatically connect on write if not connected. Defaults to
      * `false`.
      */
-    autoReconnect?: boolean;
+    autoConnect?: boolean;
 
     /**
      * Transport layer protocol to use. Defaults to [[DEFAULT_TRANSPORT]].
@@ -216,9 +219,9 @@ export class CarbonClient {
     readonly family?: 4 | 6;
 
     /**
-     * Automatically re-connect if connection closes with an error.
+     * Automatically connect on write if not connected.
      */
-    autoReconnect: boolean;
+    autoConnect: boolean;
 
     private _socket: NetSocket|DgramSocket|null = null;
     private _callbacks: { [key in keyof EventMap]: Callbacks<EventMap[key]> } = {
@@ -232,27 +235,27 @@ export class CarbonClient {
      * @param address hostname or IP address of carbon server
      * @param port port of carbon server, [[DEFAULT_PORT]] if not given
      * @param transport transport layer protocol to use, [[DEFAULT_TRANSPORT]] if not given
-     * @param autoReconnect automatically re-connect if connection closes with an error, `false` if not given
+     * @param autoConnect automatically connect on write if not connected, `false` if not given
      */
-    constructor(address: string, port?: number, transport?: IPTransport, autoReconnect?: boolean);
+    constructor(address: string, port?: number, transport?: IPTransport, autoConnect?: boolean);
 
     /**
      * 
      * @param path path of Unix domain socket
      * @param transport always `'IPC'`
-     * @param autoReconnect automatically re-connect if connection closes with an error, `false` if not given
+     * @param autoConnect automatically connect on write if not connected, `false` if not given
      */
-    constructor(path: string, transport: 'IPC', autoReconnect?: boolean);
+    constructor(path: string, transport: 'IPC', autoConnect?: boolean);
 
     constructor(options: CarbonClientOptions);
 
     constructor(arg1: string|CarbonClientOptions, arg2?: number|'IPC', arg3?: IPTransport|boolean, arg4?: boolean) {
         if (typeof arg1 === 'object') {
-            const transport = arg1.transport ?? DEFAULT_TRANSPORT;
-            this.address       = arg1.address;
-            this.port          = arg1.port ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
-            this.transport     = transport;
-            this.autoReconnect = arg1.autoReconnect ?? false;
+            const transport  = arg1.transport ?? DEFAULT_TRANSPORT;
+            this.address     = arg1.address;
+            this.port        = arg1.port ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
+            this.transport   = transport;
+            this.autoConnect = arg1.autoConnect ?? false;
             if (transport === 'UDP') {
                 this.sendBufferSize = arg1.sendBufferSize;
             }
@@ -265,27 +268,27 @@ export class CarbonClient {
                 this.port      = -1;
                 this.transport = 'IPC';
 
-                const autoReconnect = arg3 ?? false
-                if (typeof autoReconnect !== 'boolean') {
-                    throw new TypeError(`autoReconnect has illegal type: ${typeof autoReconnect}`);
+                const autoConnect = arg3 ?? false
+                if (typeof autoConnect !== 'boolean') {
+                    throw new TypeError(`autoConnect has illegal type: ${typeof autoConnect}`);
                 }
 
-                this.autoReconnect = autoReconnect;
+                this.autoConnect = autoConnect;
             } else {
                 const transport = arg3 ?? DEFAULT_TRANSPORT;
                 if (typeof transport !== 'string') {
                     throw new TypeError(`transport has illegal type: ${typeof transport}`);
                 }
                 this.port = arg2 ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
-                this.transport     = transport;
-                this.autoReconnect = arg4 ?? false;
+                this.transport   = transport;
+                this.autoConnect = arg4 ?? false;
             }
         }
 
         if (this.transport !== 'IPC') {
             const { port } = this;
-            if (port <= 0 || !isFinite(port) || (port|0) !== port) {
-                throw new Error(`Illegal port: ${port}`);
+            if (port <= 0 || !isFinite(port) || (port|0) !== port || port > 65_535) {
+                throw new Error(`illegal port number: ${port}`);
             }
         }
     }
@@ -314,9 +317,6 @@ export class CarbonClient {
                 }
             } finally {
                 this._socket = null;
-                if (hadError && this.autoReconnect) {
-                    this.connect().catch(this._onError);
-                }
             }
         }
     };
@@ -329,9 +329,14 @@ export class CarbonClient {
      * Connect client to server.
      * 
      * This creates and connects the underlying socket.
+     * 
+     * @throws Error if connected and [[CarbonClient.autoConnect]] is `false`.
      */
     async connect(): Promise<void> {
         if (this._socket) {
+            if (this.autoConnect) {
+                return;
+            }
             throw new Error('already connected');
         }
 
@@ -422,6 +427,8 @@ export class CarbonClient {
      * Normal callbacks do work.
      * 
      * @param callback Async callback for when the client is disconnected or an error during disconnect occured.
+     * 
+     * @throws Error if not connected and [[CarbonClient.autoConnect]] is `false`.
      */
     disconnect(callback: (error?: Error) => void): void;
 
@@ -429,15 +436,20 @@ export class CarbonClient {
      * Disconnect the client from the server.
      * 
      * Await the returned promise to wait for the disconnect to finish.
+     * 
+     * @throws Error if not connected and [[CarbonClient.autoConnect]] is `false`.
      */
     disconnect(): Promise<void>;
 
     disconnect(callback?: (error?: Error) => void): Promise<void>|void {
-        if (!this._socket) {
-            throw new Error('not connected');
-        }
-
         if (callback) {
+            if (!this._socket) {
+                if (this.autoConnect) {
+                    return;
+                }
+                throw new Error('not connected');
+            }
+
             if (this._socket instanceof DgramSocket) {
                 this._socket.close(callback);
             } else {
@@ -455,7 +467,10 @@ export class CarbonClient {
         } else {
             return new Promise((resolve, reject) => {
                 if (!this._socket) {
-                    return resolve();
+                    if (this.autoConnect) {
+                        return resolve();
+                    }
+                    return reject(new Error('not connected'));
                 }
 
                 try {
@@ -602,24 +617,29 @@ export class CarbonClient {
     private _send(data: string|Buffer): Promise<void> {
         return new Promise((resolve, reject) => {
             try {
+                const callback = (error?: Error|null) => error ? reject(error) : resolve();
+
                 if (!this._socket) {
-                    return reject(new Error('socket gone before data could be sent'));
+                    if (this.autoConnect) {
+                        return this.connect().then(() => {
+                            if (!this._socket) {
+                                return reject(new Error('socket gone before could send data'));
+                            }
+
+                            if (this._socket instanceof DgramSocket) {
+                                this._socket.send(data, callback);
+                            } else {
+                                this._socket.write(data, callback);
+                            }
+                        }).catch(reject);
+                    }
+                    return reject(new Error('not connected'));
                 }
 
                 if (this._socket instanceof DgramSocket) {
-                    this._socket.send(data, (error, bytes) => {
-                        if (error) {
-                            return reject(error);
-                        }
-                        resolve();
-                    });
+                    this._socket.send(data, callback);
                 } else {
-                    this._socket.write(data, error => {
-                        if (error) {
-                            return reject(error);
-                        }
-                        resolve();
-                    });
+                    this._socket.write(data, callback);
                 }
             } catch (error) {
                 reject(error);
@@ -644,10 +664,6 @@ export class CarbonClient {
     write(path: string, value: number, tags?: Tags): Promise<void>;
 
     async write(path: string, value: number, arg3?: Date|Tags, arg4?: Tags): Promise<void> {
-        if (!this._socket) {
-            throw new Error('not connected');
-        }
-
         if (!PATH_REGEXP.test(path)) {
             throw new Error(`illegal path: ${JSON.stringify(path)}`);
         }
@@ -658,6 +674,10 @@ export class CarbonClient {
         if (arg3 instanceof Date) {
             secs = arg3.getTime() / 1000;
             tags = arg4;
+
+            if (isNaN(secs)) {
+                throw new Error(`illegal date: ${arg3}`);
+            }
         } else {
             secs = Date.now() / 1000;
             tags = arg3 ?? arg4;
@@ -697,6 +717,10 @@ export class CarbonClient {
         const buf: (string|number)[] = [];
         const defaultSecs = (timestamp ? timestamp.getTime() : Date.now()) / 1000;
 
+        if (isNaN(defaultSecs)) {
+            throw new Error(`illegal date: ${timestamp}`);
+        }
+
         if (Array.isArray(batch)) {
             for (const [path, value, arg3, arg4] of batch) {
                 if (!PATH_REGEXP.test(path)) {
@@ -708,6 +732,10 @@ export class CarbonClient {
                 if (arg3 instanceof Date) {
                     secs = arg3.getTime() / 1000;
                     tags = arg4;
+
+                    if (isNaN(secs)) {
+                        throw new Error(`illegal date: ${arg3}`);
+                    }
                 } else {
                     secs = defaultSecs;
                     tags = arg3 ?? arg4;
@@ -737,7 +765,15 @@ export class CarbonClient {
                 } else {
                     value = arg.value;
                     const { timestamp, tags } = arg;
-                    secs = timestamp ? timestamp.getTime() / 1000 : defaultSecs;
+                    if (timestamp) {
+                        secs = timestamp.getTime() / 1000;
+
+                        if (isNaN(secs)) {
+                            throw new Error(`illegal date: ${timestamp}`);
+                        }
+                    } else {
+                        secs = defaultSecs;
+                    }
 
                     if (tags) {
                         appendTags(buf, tags);
