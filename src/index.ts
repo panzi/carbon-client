@@ -803,7 +803,7 @@ export class CarbonClient {
 
                     this._sendBuffer.write(data, this._sendBufferOffset);
                     this._sendBufferOffset = newOffset;
-    
+
                     if (this._sendIntervalTimer === null) {
                         this._sendIntervalTimer = setTimeout(this._sendCallback, this.sendInterval);
                     }
@@ -811,6 +811,10 @@ export class CarbonClient {
                     return promise;
                 } else {
                     // doesn't fit into buffer, send immediately
+                    if (this.transport === 'UDP') {
+                        // if at all possible don't exceed sendBufferSize in one send using UDP
+                        return this._send(buf).then(() => this._send(Buffer.from(data)));
+                    }
                     return this._send(Buffer.concat([ buf, Buffer.from(data) ]));
                 }
             }
@@ -825,7 +829,7 @@ export class CarbonClient {
 
                 return Promise.resolve();
             } else {
-                // doesn't fit into buffer, send immediately
+                // doesn't fit into buffer (or is exactly the buffer size), send immediately
                 return this._send(Buffer.from(data));
             }
         } else {
