@@ -1,6 +1,6 @@
 import { Socket as NetSocket } from 'net';
 import { Socket as DgramSocket, createSocket as createDgramSocket } from 'dgram';
-import * as dns from 'dns/promises';
+import * as dns from 'dns';
 
 /**
  * @ignore
@@ -33,6 +33,22 @@ export const DEFAULT_PORT: number = 2003;
 export const DEFAULT_TRANSPORT: Transport = 'TCP';
 
 /**
+ * Default size of send buffer.
+ * 
+ * The size of this buffer (1428 bytes) is dimensioned so that the buffer as
+ * well as the TCP and IP header fit into one Ethernet frame and can (hopefully)
+ * be delivered without fragmentation. 
+ * 
+ * @see <https://collectd.org/wiki/index.php/Plugin:Write_Graphite>
+ */
+export const DEFAULT_SEND_BUFFER_SIZE: number = 1428;
+
+/**
+ * Default buffer time between sends in milliseconds.
+ */
+export const DEFAULT_SEND_INTERVAL: number = 1000;
+
+/**
  * [[CarbonClient]] options.
  */
 export interface CarbonClientOptions {
@@ -61,9 +77,23 @@ export interface CarbonClientOptions {
     transport?: Transport;
 
     /**
-     * The `sendBufferSize` of UDP sockets to use.
+     * Size of send buffer. If set to `0` metrics are sent immediately.
+     * Defaults to [[DEFAULT_SEND_BUFFER_SIZE]].
      */
     sendBufferSize?: number;
+
+    /**
+     * Buffer wait time. If set to `0` metrics are sent immediately.
+     * Defaults to [[DEFAULT_SEND_INTERVAL]].
+     */
+    sendInterval?: number;
+
+    /**
+     * If [[CarbonClient.transport]] is `"UDP"` the
+     * [dgram.SocketOptions.sendBufferSize](https://nodejs.org/dist/latest-v16.x/docs/api/dgram.html#dgramcreatesocketoptions-callback)
+     * of UDP sockets.
+     */
+    udpSendBufferSize?: number;
 
     /**
      * For TCP and UDP the IP address family to use.
@@ -205,9 +235,23 @@ export class CarbonClient {
     readonly transport: Transport;
 
     /**
-     * The `sendBufferSize` of UDP sockets to use.
+     * If [[CarbonClient.transport]] is `"UDP"` the
+     * [dgram.SocketOptions.sendBufferSize](https://nodejs.org/dist/latest-v16.x/docs/api/dgram.html#dgramcreatesocketoptions-callback)
+     * of UDP sockets.
      */
-    readonly sendBufferSize?: number;
+    readonly udpSendBufferSize?: number;
+
+    /**
+     * Size of send buffer. If set to `0` metrics are sent immediately.
+     * Defaults to [[DEFAULT_SEND_BUFFER_SIZE]].
+     */
+    readonly sendBufferSize: number = DEFAULT_SEND_BUFFER_SIZE;
+
+    /**
+     * Buffer wait time. If set to `0` metrics are sent immediately.
+     * Defaults to [[DEFAULT_SEND_INTERVAL]].
+     */
+    readonly sendInterval: number = DEFAULT_SEND_INTERVAL;
 
     /**
      * For TCP and UDP the IP address family to use.
@@ -232,6 +276,10 @@ export class CarbonClient {
         error:   { callbacks: [], emitActive: false, remove: [] },
         close:   { callbacks: [], emitActive: false, remove: [] },
     };
+
+    private readonly _sendBuffer?: Buffer;
+    private _sendBufferOffset: number = 0;
+    private _sendIntervalTimer: NodeJS.Timeout|null = null;
 
     /**
      * 
@@ -259,9 +307,29 @@ export class CarbonClient {
             this.port        = arg1.port ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
             this.transport   = transport;
             this.autoConnect = arg1.autoConnect ?? false;
-            if (transport === 'UDP') {
-                this.sendBufferSize = arg1.sendBufferSize;
+
+            const { sendBufferSize, udpSendBufferSize, sendInterval } = arg1;
+            if (sendBufferSize != undefined) {
+                if (!isFinite(sendBufferSize) || sendBufferSize < 0 || (sendBufferSize|0) !== sendBufferSize) {
+                    throw new Error(`illegal sendBufferSize: ${sendBufferSize}`);
+                }
+                this.sendBufferSize = sendBufferSize;
             }
+
+            if (transport === 'UDP' && udpSendBufferSize != undefined) {
+                if (!isFinite(udpSendBufferSize) || udpSendBufferSize <= 0 || (udpSendBufferSize|0) !== udpSendBufferSize) {
+                    throw new Error(`illegal udpSendBufferSize: ${udpSendBufferSize}`);
+                }
+                this.udpSendBufferSize = udpSendBufferSize;
+            }
+
+            if (sendInterval != undefined) {
+                if (!isFinite(sendInterval) || sendInterval < 0) {
+                    throw new Error(`illegal sendInterval: ${sendInterval}`);
+                }
+                this.sendInterval = sendInterval;
+            }
+
             if (transport !== 'IPC') {
                 this.family = arg1.family;
             }
@@ -293,6 +361,10 @@ export class CarbonClient {
             if (port <= 0 || !isFinite(port) || (port|0) !== port || port > 65_535) {
                 throw new Error(`illegal port number: ${port}`);
             }
+        }
+
+        if (this.sendBufferSize > 0 && this.sendInterval > 0) {
+            this._sendBuffer = Buffer.alloc(this.sendBufferSize);
         }
     }
 
@@ -328,6 +400,9 @@ export class CarbonClient {
         this._onClose(false);
     };
 
+    connect(): Promise<void>;
+    connect(callback: (error?: Error) => void): void;
+
     /**
      * Connect client to server.
      * 
@@ -335,51 +410,32 @@ export class CarbonClient {
      * 
      * @throws Error if connected and [[CarbonClient.autoConnect]] is `false`.
      */
-    async connect(): Promise<void> {
+    connect(callback?: (error?: Error) => void): Promise<void>|void {
         if (this._socket) {
             if (this.autoConnect) {
-                return;
+                if (callback) {
+                    return callback();
+                } else {
+                    return Promise.resolve();
+                }
             }
-            throw new Error('already connected');
+            const error = new Error('already connected');
+            if (callback) {
+                return callback(error);
+            } else {
+                return Promise.reject(error);
+            }
         }
 
         let address: string;
-        if (this.transport === 'TCP' || this.transport === 'IPC') {
-            address = this.address;
-            this._socket = new NetSocket({ writable: true });
-
-            this._socket.on('close', this._onClose);
-        } else {
-            if (this.family === undefined) {
-                const addresses = await dns.lookup(this.address, { all: true });
-                const adr = addresses.find(adr => adr.family === 6) ?? addresses.find(adr => adr.family === 4);
-                if (!adr) {
-                    throw new Error(`host not found: ${this.address}`);
-                }
-                address = adr.address;
-                this._socket = createDgramSocket({
-                    type: adr.family === 6 ? 'udp6' : 'udp4',
-                    sendBufferSize: this.sendBufferSize,
-                });
-            } else {
-                address = this.address;
-                this._socket = createDgramSocket({
-                    type: this.family === 6 ? 'udp6' : 'udp4',
-                    sendBufferSize: this.sendBufferSize,
-                });
-            }
-
-            this._socket.on('close', this._onCloseOk);
-        }
-
-        this._socket.on('connect', this._onConnect);
-        this._socket.on('error', this._onError);
-
-        return new Promise((resolve, reject) => {
+        const executor = (resolve: () => void, reject: (error: Error) => void): void => {
             try {
                 if (!this._socket) {
                     return reject(new Error('socket gone before could connect'));
                 }
+
+                this._socket.on('connect', this._onConnect);
+                this._socket.on('error', this._onError);
 
                 const callback = () => {
                     try {
@@ -407,9 +463,61 @@ export class CarbonClient {
                     }
                 }
             } catch (error) {
-                reject(error);
+                reject(error instanceof Error ? error : new Error(String(error)));
             }
-        });
+        };
+
+        if (this.transport === 'TCP' || this.transport === 'IPC') {
+            address = this.address;
+            this._socket = new NetSocket({ writable: true });
+
+            this._socket.on('close', this._onClose);
+        } else {
+            if (this.family === undefined) {
+                const dnsExecutor = (resolve: () => void, reject: (error: Error) => void): void => {
+                    dns.lookup(this.address, { all: true }, (error, addresses) => {
+                        if (error) {
+                            return reject(error);
+                        }
+                        const adr = addresses.find(adr => adr.family === 6) ?? addresses.find(adr => adr.family === 4);
+                        if (!adr) {
+                            return reject(new Error(`host not found: ${this.address}`));
+                        }
+                        address = adr.address;
+                        try {
+                            this._socket = createDgramSocket({
+                                type: adr.family === 6 ? 'udp6' : 'udp4',
+                                sendBufferSize: this.udpSendBufferSize,
+                            });
+                            this._socket.on('close', this._onCloseOk);
+                        } catch (error) {
+                            return reject(error instanceof Error ? error : new Error(String(error)));
+                        }
+
+                        executor(resolve, reject);
+                    });
+                };
+
+                if (callback) {
+                    return dnsExecutor(callback, callback);
+                } else {
+                    return new Promise(dnsExecutor);
+                }
+            } else {
+                address = this.address;
+                this._socket = createDgramSocket({
+                    type: this.family === 6 ? 'udp6' : 'udp4',
+                    sendBufferSize: this.udpSendBufferSize,
+                });
+                this._socket.on('close', this._onCloseOk);
+            }
+        }
+
+        if (callback) {
+            executor(callback, callback);
+        } else {
+            return new Promise(executor);
+        }
     }
 
     /**
@@ -423,7 +531,26 @@ export class CarbonClient {
     }
 
     /**
+     * Returns true if the client bufferes multiple writes into one send.
+     * @see [[CarbonClient.sendBufferSize]] and [[CarbonClient.sendInterval]].
+     */
+    get isBuffered(): boolean {
+        return !!this._sendBuffer;
+    }
+
+    /**
+     * Returns the number of currently buffered bytes.
+     * 
+     * If [[CarbonClient.isBuffered]] is `false` this is always `0`.
+     */
+    get bufferedBytes(): number {
+        return this._sendBufferOffset;
+    }
+
+    /**
      * Disconnect the client from the server.
+     * 
+     * Also flushes unsent data, if any.
      * 
      * This alternative exists because awaiting promises on graceful shutdown
      * seems to not work (the await never returns and the process just quits).
@@ -438,6 +565,8 @@ export class CarbonClient {
     /**
      * Disconnect the client from the server.
      * 
+     * Also flushes unsent data, if any.
+     * 
      * Await the returned promise to wait for the disconnect to finish.
      * 
      * @throws Error if not connected and [[CarbonClient.autoConnect]] is `false`.
@@ -445,30 +574,12 @@ export class CarbonClient {
     disconnect(): Promise<void>;
 
     disconnect(callback?: (error?: Error) => void): Promise<void>|void {
-        if (callback) {
-            if (!this._socket) {
-                if (this.autoConnect) {
-                    return;
+        const executor = (resolve: () => void, reject: (error: Error) => void): void => {
+            this.flush(error => {
+                if (error) {
+                    return reject(error);
                 }
-                throw new Error('not connected');
-            }
 
-            if (this._socket instanceof DgramSocket) {
-                this._socket.close(callback);
-            } else {
-                this._socket.end(() => {
-                    try {
-                        if (this._socket instanceof NetSocket) {
-                            this._socket.destroy();
-                        }
-                    } catch (error) {
-                        return callback(error instanceof Error ? error : new Error(String(error)));
-                    }
-                    callback();
-                });
-            }
-        } else {
-            return new Promise((resolve, reject) => {
                 if (!this._socket) {
                     if (this.autoConnect) {
                         return resolve();
@@ -486,15 +597,64 @@ export class CarbonClient {
                                     this._socket.destroy();
                                 }
                             } catch (error) {
-                                return reject(error);
+                                return reject(error instanceof Error ? error : new Error(String(error)));
                             }
                             resolve();
                         });
                     }
                 } catch (error) {
-                    reject(error);
+                    return reject(error instanceof Error ? error : new Error(String(error)));
                 }
             });
+        };
+
+        if (callback) {
+            executor(callback, callback);
+        } else {
+            return new Promise(executor);
+        }
+    }
+
+    flush(): Promise<void>;
+    flush(callback: (error?: Error) => void): void;
+
+    /**
+     * Flush any buffered data.
+     * 
+     * Safe to call even if [[CarbonClient.isBuffered]] is `false`.
+     * 
+     * @throws Error if not connected and [[CarbonClient.autoConnect]] is `false`.
+     */
+    flush(callback?: (error?: Error) => void): Promise<void>|void {
+        const executor = (resolve: () => void, reject: (error: Error) => void): void => {
+            if (!this._socket && !this.autoConnect) {
+                return reject(new Error('not connected'));
+            }
+
+            if (this._sendIntervalTimer !== null) {
+                clearTimeout(this._sendIntervalTimer);
+                this._sendIntervalTimer = null;
+            }
+
+            if (this._sendBuffer && this._sendBufferOffset > 0) {
+                const buf = this._sendBuffer.slice(0, this._sendBufferOffset);
+                this._sendBufferOffset = 0;
+
+                this._send(buf, error => {
+                    if (error) {
+                        return reject(error);
+                    }
+                    resolve();
+                });
+            } else {
+                resolve();
+            }
+        };
+
+        if (callback) {
+            executor(callback, callback);
+        } else {
+            return new Promise(executor);
         }
     }
 
@@ -617,37 +777,106 @@ export class CarbonClient {
         }
     }
 
-    private _send(data: string|Buffer): Promise<void> {
-        return new Promise((resolve, reject) => {
+    private _sendCallback = () => {
+        this._sendIntervalTimer = null;
+        if (this._sendBuffer && this._sendBufferOffset > 0) {
+            const buf = this._sendBuffer.slice(0, this._sendBufferOffset);
+            this._sendBufferOffset = 0;
+            this._send(buf, this._onError);
+        }
+    };
+
+    private _bufferedSend(data: string): Promise<void> {
+        if (!this._socket && !this.autoConnect) {
+            return Promise.reject(new Error('not connected'));
+        }
+
+        if (this._sendBuffer) {
+            const byteCount = Buffer.byteLength(data);
+            let newOffset = byteCount + this._sendBufferOffset;
+            if (newOffset > this._sendBuffer.length && this._sendBufferOffset > 0) {
+                const buf = this._sendBuffer.slice(0, this._sendBufferOffset);
+                this._sendBufferOffset = 0;
+                newOffset = byteCount;
+                if (newOffset < this._sendBuffer.length) {
+                    const promise = this._send(buf);
+
+                    this._sendBuffer.write(data, this._sendBufferOffset);
+                    this._sendBufferOffset = newOffset;
+    
+                    if (this._sendIntervalTimer === null) {
+                        this._sendIntervalTimer = setTimeout(this._sendCallback, this.sendInterval);
+                    }
+
+                    return promise;
+                } else {
+                    // doesn't fit into buffer, send immediately
+                    return this._send(Buffer.concat([ buf, Buffer.from(data) ]));
+                }
+            }
+
+            if (newOffset < this._sendBuffer.length) {
+                this._sendBuffer.write(data, this._sendBufferOffset);
+                this._sendBufferOffset = newOffset;
+
+                if (this._sendIntervalTimer === null) {
+                    this._sendIntervalTimer = setTimeout(this._sendCallback, this.sendInterval);
+                }
+
+                return Promise.resolve();
+            } else {
+                // doesn't fit into buffer, send immediately
+                return this._send(Buffer.from(data));
+            }
+        } else {
+            return this._send(Buffer.from(data));
+        }
+    }
+
+    private _send(data: Buffer): Promise<void>;
+    private _send(data: Buffer, callback: (error?: Error) => void): void;
+
+    private _send(data: Buffer, callback?: (error?: Error) => void): Promise<void>|void {
+        const executor = (resolve: () => void, reject: (error: Error) => void): void => {
             try {
-                const callback = (error?: Error|null) => error ? reject(error) : resolve();
+                const socketCallback = (error?: Error|null) => error ? reject(error) : resolve();
 
                 if (!this._socket) {
                     if (this.autoConnect) {
-                        return this.connect().then(() => {
+                        return this.connect(error => {
+                            if (error) {
+                                return reject(error);
+                            }
+
                             if (!this._socket) {
                                 return reject(new Error('socket gone before could send data'));
                             }
 
                             if (this._socket instanceof DgramSocket) {
-                                this._socket.send(data, callback);
+                                this._socket.send(data, socketCallback);
                             } else {
-                                this._socket.write(data, callback);
+                                this._socket.write(data, socketCallback);
                             }
-                        }).catch(reject);
+                        });
                     }
                     return reject(new Error('not connected'));
                 }
 
                 if (this._socket instanceof DgramSocket) {
-                    this._socket.send(data, callback);
+                    this._socket.send(data, socketCallback);
                 } else {
-                    this._socket.write(data, callback);
+                    this._socket.write(data, socketCallback);
                 }
             } catch (error) {
-                reject(error);
+                reject(error instanceof Error ? error : new Error(String(error)));
             }
-        });
+        };
+
+        if (callback) {
+            executor(callback, callback);
+        } else {
+            return new Promise(executor);
+        }
     }
 
     /**
@@ -702,7 +931,7 @@ export class CarbonClient {
             data = `${path} ${value} ${secs}\n`;
         }
 
-        return this._send(data);
+        return this._bufferedSend(data);
     }
 
     /**
@@ -789,7 +1018,7 @@ export class CarbonClient {
 
         const data = buf.join('');
 
-        return this._send(data);
+        return this._bufferedSend(data);
     }
 
     /**
