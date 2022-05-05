@@ -273,15 +273,25 @@ describe('Illegal Values', () => {
         '\x7f',
     ]
 
+    const illegalPathChars = [
+        ' ', '\n', '/', '\\', '\t', '\r', '\v', '\t', '!', '?', '*', '%', '%a', '%zz',
+        '(', ')', '[', ']', '{', '}', '<', '>', '|', '"', "'", '^', '~', ',', ':', ';',
+        '=', '`', '#', 'Ä',
+        ...controlChars,
+    ];
+
     const illegalPaths = [
         '',
         '.foo',
         'foo.',
         'foo..bar',
-        ' ', '\n', '/', '\\', '\t', '\r', '\v', '\t', '!', '?', '*', '%', '%a', '%zz',
-        '(', ')', '[', ']', '{', '}', '<', '>', '|', '"', "'", '^', '~', ',', ':', ';',
-        '=', '`', '#', 'Ä',
-        ...controlChars,
+        ...illegalPathChars,
+    ];
+
+    const illegalPrefixes = [
+        '.foo',
+        'foo..bar',
+        ...illegalPathChars,
     ];
 
     const illegalTagValues = [
@@ -368,6 +378,16 @@ describe('Illegal Values', () => {
             }
         } finally {
             await client.disconnect();
+        }
+    });
+
+    test('Illegal Prefixes', async () => {
+        for (const illegalPrefix of illegalPrefixes) {
+            expect(() => new CarbonClient({
+                address: 'localhost',
+                transport: 'UDP',
+                prefix: illegalPrefix,
+            })).toThrow(`illegal prefix: ${JSON.stringify(illegalPrefix)}`);
         }
     });
 
@@ -752,6 +772,63 @@ describe('Write Metrics', () => {
                 }
             });
         })
+    }
+
+    for (const prefix of ['foo', 'foo.bar.']) {
+        test(`With Prefix ${prefix}`, async () => {
+            const server = new Server();
+            const port = 2222;
+            try {
+                await listenTCP(server, port, 'localhost');
+                const client = new CarbonClient({
+                    address: 'localhost',
+                    port,
+                    transport: 'TCP',
+                    prefix,
+                });
+
+                let promise = receive(server);
+                let whenClosed = waitEvent(client, 'close');
+
+                await client.connect();
+                await client.write('baz', 1, new Date(DATE_TIME_1_STR));
+                await client.disconnect();
+                expect((await promise).toString()).toBe(`${prefix}baz 1 ${unixTime(DATE_TIME_1_STR)}\n`);
+                await whenClosed;
+
+                promise = receive(server);
+                whenClosed = waitEvent(client, 'close');
+                await client.connect();
+                await client.batchWrite([
+                    ['baz', 1],
+                    ['egg.bacon', 2],
+                ], new Date(DATE_TIME_1_STR))
+                await client.disconnect();
+                expect((await promise).toString()).toBe(
+                    `${prefix}baz 1 ${unixTime(DATE_TIME_1_STR)}\n`+
+                    `${prefix}egg.bacon 2 ${unixTime(DATE_TIME_1_STR)}\n`
+                );
+                await whenClosed;
+
+                promise = receive(server);
+                whenClosed = waitEvent(client, 'close');
+                await client.connect();
+                await client.batchWrite({
+                    'baz': 1,
+                    'egg.bacon': 2,
+                }, new Date(DATE_TIME_1_STR))
+                await client.disconnect();
+                expect((await promise).toString()).toBe(
+                    `${prefix}baz 1 ${unixTime(DATE_TIME_1_STR)}\n`+
+                    `${prefix}egg.bacon 2 ${unixTime(DATE_TIME_1_STR)}\n`
+                );
+                await whenClosed;
+            } finally {
+                if (server.listening) {
+                    await close(server);
+                }
+            }
+        });
     }
 });
 

@@ -12,6 +12,7 @@ export type EventMap = {
 };
 
 const PATH_REGEXP = /^(?:[-+@$_a-zA-Z0-9]|%[0-9a-fA-F]{2})+(?:\.(?:[-+@$_a-zA-Z0-9]|%[0-9a-fA-F]{2})+)*$/;
+const PREFIX_REGEXP = /^(?:[-+@$_a-zA-Z0-9]|%[0-9a-fA-F]{2})+(?:\.(?:[-+@$_a-zA-Z0-9]|%[0-9a-fA-F]{2})+)*\.?$/;
 const TAG_NAME_REGEXP = PATH_REGEXP;
 const TAG_VALUE_REGEXP = /^(?:[-+@$_.*:,&#|<>\[\](){}=!?^\/\\a-zA-Z0-9]|%[0-9a-fA-F]{2})+$/;
 
@@ -101,6 +102,11 @@ export interface CarbonClientOptions {
      * @see [[CarbonClient.family]]
      */
     family?: 4 | 6;
+
+    /**
+     * Prefix added to all metric paths.
+     */
+    prefix?: string;
 }
 
 /**
@@ -183,6 +189,8 @@ interface Callbacks<Callback extends Function> {
  * path           = path-component ('.' path-component)*
  * path-component = (letter | digit | '-' | '+' | '@' | '$' | '_' | hex-encoding)+
  * 
+ * prefix         = path '.'?
+ * 
  * tag-name       = path
  * 
  * tag-value      = (letter | digit | '-' | '+' | '@' | '$' | '_' | '.' | '*'
@@ -194,7 +202,6 @@ interface Callbacks<Callback extends Function> {
  * letter         = 'a' ... 'z' | 'A' ... 'Z'
  * digit          = '0' ... '9'
  * hex-digit      = '0' ... '9' | 'a' ... 'f' | 'A' ... 'F'
-
  * ```
  * 
  * Note that tag values may not be empty.
@@ -263,6 +270,11 @@ export class CarbonClient {
     readonly family?: 4 | 6;
 
     /**
+     * Prefix added to all metric paths.
+     */
+    readonly prefix: string = '';
+
+    /**
      * Automatically connect on write if not connected.
      * 
      * Also if `ture` then calls of [[CarbonClient.connect]] when connected and
@@ -308,7 +320,15 @@ export class CarbonClient {
             this.transport   = transport;
             this.autoConnect = arg1.autoConnect ?? false;
 
-            const { sendBufferSize, udpSendBufferSize, sendInterval } = arg1;
+            const { prefix, sendBufferSize, udpSendBufferSize, sendInterval } = arg1;
+
+            if (prefix) {
+                if (!PREFIX_REGEXP.test(prefix)) {
+                    throw new Error(`illegal prefix: ${JSON.stringify(prefix)}`);
+                }
+                this.prefix = prefix;
+            }
+
             if (sendBufferSize != undefined) {
                 if (!isFinite(sendBufferSize) || sendBufferSize < 0 || (sendBufferSize|0) !== sendBufferSize) {
                     throw new Error(`illegal sendBufferSize: ${sendBufferSize}`);
@@ -925,14 +945,15 @@ export class CarbonClient {
         // -> value and timestamp are both parsed using Python's float() type
         // constructor.
 
+        const { prefix } = this;
         let data: string|Buffer;
         if (tags) {
-            const buf: (string|number)[] = [ path ];
+            const buf: (string|number)[] = [ prefix, path ];
             appendTags(buf, tags);
             buf.push(' ', value, ' ', secs, '\n');
             data = buf.join('');
         } else {
-            data = `${path} ${value} ${secs}\n`;
+            data = `${prefix}${path} ${value} ${secs}\n`;
         }
 
         return this._bufferedSend(data);
@@ -952,6 +973,7 @@ export class CarbonClient {
     async batchWrite(batch: MetricMap|MetricTuple[], timestamp?: Date): Promise<void> {
         const buf: (string|number)[] = [];
         const defaultSecs = (timestamp ? timestamp.getTime() : Date.now()) / 1000;
+        const { prefix } = this;
 
         if (isNaN(defaultSecs)) {
             throw new Error(`illegal date: ${timestamp}`);
@@ -977,7 +999,7 @@ export class CarbonClient {
                     tags = arg3 ?? arg4;
                 }
 
-                buf.push(path);
+                buf.push(prefix, path);
                 if (tags) {
                     appendTags(buf, tags);
                 }
@@ -994,7 +1016,7 @@ export class CarbonClient {
                 let value: number;
                 let secs: number;
 
-                buf.push(path);
+                buf.push(prefix, path);
                 if (typeof arg === 'number') {
                     value = arg;
                     secs = defaultSecs;
