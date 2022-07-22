@@ -802,7 +802,11 @@ export class CarbonClient {
         if (this._sendBuffer && this._sendBufferOffset > 0) {
             const buf = this._sendBuffer.slice(0, this._sendBufferOffset);
             this._sendBufferOffset = 0;
-            this._send(buf, this._onError);
+            this._send(buf, error => {
+                if (error) {
+                    this._onError(error);
+                }
+            });
         }
     };
 

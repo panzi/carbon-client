@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeAll } from '@jest/globals';
+import { describe, expect, test, beforeAll, afterAll } from '@jest/globals';
 import { Socket as NetSocket, Server } from 'net';
 import { Socket as DgramSocket, createSocket as createDgramSocket } from 'dgram';
 import MockDate from 'mockdate';
