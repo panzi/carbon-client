@@ -628,6 +628,10 @@ describe('Write Metrics', () => {
     const expectedBatch = expectedLines.join('');
 
     async function testWrite(client: CarbonClient, receive: () => Promise<Buffer>): Promise<void> {
+        const errors: Error[] = [];
+        client.on('error', error => {
+            errors.push(error);
+        });
         let promise = receive();
         let whenClosed = waitEvent(client, 'close');
 
@@ -643,6 +647,7 @@ describe('Write Metrics', () => {
             expect((await promise).toString()).toBe(expectedLines[0]);
         }
         await whenClosed;
+        expect(errors.length).toStrictEqual(0);
 
         whenClosed = waitEvent(client, 'close');
         promise = receive();
@@ -651,6 +656,7 @@ describe('Write Metrics', () => {
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
+        expect(errors.length).toStrictEqual(0);
 
         whenClosed = waitEvent(client, 'close');
         promise = receive();
@@ -659,11 +665,16 @@ describe('Write Metrics', () => {
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
+        expect(errors.length).toStrictEqual(0);
     }
 
     const extraWait = 100;
 
     async function testBufferedWrite(client: CarbonClient, receive: () => Promise<Buffer>): Promise<void> {
+        const errors: Error[] = [];
+        client.on('error', error => {
+            errors.push(error);
+        });
         let promise = receive();
         let whenClosed = waitEvent(client, 'close');
 
@@ -678,6 +689,7 @@ describe('Write Metrics', () => {
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedLines[0] + expectedLines[1]);
         await whenClosed;
+        expect(errors.length).toStrictEqual(0);
 
         whenClosed = waitEvent(client, 'close');
         promise = receive();
@@ -691,6 +703,7 @@ describe('Write Metrics', () => {
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
+        expect(errors.length).toStrictEqual(0);
 
         whenClosed = waitEvent(client, 'close');
         promise = receive();
@@ -704,6 +717,7 @@ describe('Write Metrics', () => {
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
+        expect(errors.length).toStrictEqual(0);
     }
 
     interface TestGroup {
