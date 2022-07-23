@@ -924,7 +924,6 @@ export class CarbonClient {
             try {
                 let sendRetryCount = 0;
                 const sendCallback = (error?: Error|null) => {
-                    console.log('send callback', typeof data === 'string' ? data : data.toString('utf-8'), error);
                     if (error) {
                         if (this._socket && sendRetryCount < this.retryOnError) {
                             ++ sendRetryCount;
