@@ -335,6 +335,20 @@ describe('Illegal Values', () => {
         -Infinity,
     ];
 
+    const illegalRetryOnErrorValues = [
+        -10,
+        NaN,
+        Infinity,
+        -Infinity,
+    ];
+
+    const illegalRetryTimeouts = [
+        -10,
+        NaN,
+        Infinity,
+        -Infinity,
+    ];
+
     test('Illegal Ports', () => {
         for (const illegalPort of illegalPorts) {
             expect(() => new CarbonClient('localhost', illegalPort)).toThrow(`illegal port number: ${illegalPort}`);
@@ -463,6 +477,24 @@ describe('Illegal Values', () => {
             }
         } finally {
             await client.disconnect();
+        }
+    });
+
+    test('Illegal Retry On Error Values', () => {
+        for (const illegalRetryOnError of illegalRetryOnErrorValues) {
+            expect(() => new CarbonClient({
+                address: 'localhost',
+                retryOnError: illegalRetryOnError,
+            })).toThrow(`illegal retryOnError: ${illegalRetryOnError}`);
+        }
+    });
+
+    test('Illegal Retry Timeouts', () => {
+        for (const illegalRetryTimeout of illegalRetryTimeouts) {
+            expect(() => new CarbonClient({
+                address: 'localhost',
+                retryTimeout: illegalRetryTimeout,
+            })).toThrow(`illegal retryTimeout: ${illegalRetryTimeout}`);
         }
     });
 });
@@ -948,6 +980,94 @@ describe('Server Offline', () => {
                 } finally {
                     await unlinkIfExists(pipe);
                 }
+            });
+        });
+    }
+});
+
+describe('Retry On Error', () => {
+    const key = 'host.server.key';
+    const value = 123;
+    const timestamp = new Date(DATE_TIME_1_STR);
+    const expectedLine = `${key} ${value} ${unixTime(DATE_TIME_1_STR)}\n`;
+
+    for (const buffered of [true, false]) {
+        describe(buffered ? 'Buffered' : 'Unbuffered', () => {
+            const port = 2222;
+            const pipe = resolve(tmpdir(), buffered ?
+                `carbon-client.test.${process.pid}.no-server.pipe` :
+                `carbon-client.test.${process.pid}.no-server-unbuffered.pipe`);
+            const sendBufferSize = buffered ? undefined : 0;
+
+            async function doTest(client: CarbonClient, listen: (server: Server) => Promise<void>, errorCode: string): Promise<void> {
+                let errors: Error[] = [];
+                client.on('error', error => {
+                    errors.push(error);
+                });
+
+                client.vwrite(key, value, timestamp);
+
+                await sleep(25);
+
+                const server = new Server();
+                try {
+                    await listen(server);
+                    const promise = receive(server);
+
+                    await sleep(25);
+                    await client.disconnect();
+
+                    expect((await promise).toString()).toStrictEqual(expectedLine);
+                } finally {
+                    if (server.listening) {
+                        await close(server);
+                    }
+                }
+
+                expect(errors.length).toBeGreaterThan(0);
+
+                if (buffered) {
+                    errors = [];
+                    await client.write('host.server.key2', 123);
+                    await sleep(25);
+                    expect(errors.length).toBeGreaterThan(0);
+                    expect(errors[0]).toMatchObject({
+                        code: errorCode
+                    });
+                } else {
+                    await expect(client.write('host.server.key2', 123)).rejects.toMatchObject({
+                        code: errorCode
+                    });
+                }
+
+                await client.disconnect();
+            }
+
+            test('TCP', async () => {
+                const client = new CarbonClient({
+                    address: 'localhost',
+                    port,
+                    transport: 'TCP',
+                    sendBufferSize,
+                    sendInterval: 2,
+                    retryOnError: 5,
+                    retryTimeout: 10,
+                    autoConnect: true,
+                });
+                await doTest(client, server => listenTCP(server, port, 'localhost'), 'ECONNREFUSED');
+            });
+
+            test('IPC', async () => {
+                const client = new CarbonClient({
+                    address: pipe,
+                    transport: 'IPC',
+                    sendBufferSize,
+                    sendInterval: 2,
+                    retryOnError: 5,
+                    retryTimeout: 10,
+                    autoConnect: true,
+                });
+                await doTest(client, server => listenIPC(server, pipe), 'ENOENT');
             });
         });
     }

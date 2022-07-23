@@ -78,18 +78,18 @@ export interface CarbonClientOptions {
     autoConnect?: boolean;
 
     /**
-     * Automatically retry sending on error. Defaults to `false`.
+     * Number of automatic retries on network error. Defaults to `0`.
      * 
      * @see [[CarbonClient.retryOnError]]
      */
-    retryOnError?: boolean;
+    retryOnError?: number;
 
     /**
      * Time to wait before retrying after error.
      * 
      * @see [[CarbonClient.retryTimeout]]
      */
-     retryTimeout?: number;
+    retryTimeout?: number;
 
     /**
      * Transport layer protocol to use. Defaults to [[DEFAULT_TRANSPORT]].
@@ -168,6 +168,10 @@ function appendTags(buf: string[]|(string|number)[], tags: Tags): void {
 
         buf.push(';', tag, '=', value);
     }
+}
+
+function sleep(milliseconds: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
 interface CallbackInfo<Callback extends Function> {
@@ -302,13 +306,13 @@ export class CarbonClient {
     autoConnect: boolean;
 
     /**
-     * Automatically retry sending on error.
+     * Number of automatic retries on network error. Defaults to `0`.
      * 
      * Error handlers are still called.
      * 
      * @see [[CarbonClient.retryTimeout]]
      */
-    retryOnError: boolean;
+    retryOnError: number = 0;
 
     /**
      * Time to wait before retrying after error.
@@ -354,9 +358,8 @@ export class CarbonClient {
             this.port         = arg1.port ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
             this.transport    = transport;
             this.autoConnect  = arg1.autoConnect ?? false;
-            this.retryOnError = arg1.retryOnError ?? false;
 
-            const { prefix, sendBufferSize, udpSendBufferSize, sendInterval, retryTimeout } = arg1;
+            const { prefix, sendBufferSize, udpSendBufferSize, sendInterval, retryTimeout, retryOnError } = arg1;
 
             if (prefix) {
                 if (!PREFIX_REGEXP.test(prefix)) {
@@ -386,6 +389,13 @@ export class CarbonClient {
                 this.sendInterval = sendInterval;
             }
 
+            if (retryOnError != undefined) {
+                if (!isFinite(retryOnError) || retryOnError < 0 || (retryOnError|0) !== retryOnError) {
+                    throw new Error(`illegal retryOnError: ${retryOnError}`);
+                }
+                this.retryOnError = retryOnError;
+            }
+
             if (retryTimeout != undefined) {
                 if (!isFinite(retryTimeout) || retryTimeout < 0) {
                     throw new Error(`illegal retryTimeout: ${retryTimeout}`);
@@ -398,7 +408,7 @@ export class CarbonClient {
             }
         } else {
             this.address = arg1;
-            this.retryOnError = false;
+            this.retryOnError = 0;
 
             if (arg2 === 'IPC') {
                 this.port      = -1;
@@ -855,7 +865,7 @@ export class CarbonClient {
         }
     };
 
-    private _bufferedSend(data: string|Buffer): Promise<void> {
+    private _bufferedSend(data: string): Promise<void> {
         if (!this._socket && !this.autoConnect) {
             return Promise.reject(new Error('not connected'));
         }
@@ -870,11 +880,7 @@ export class CarbonClient {
                 if (newOffset < this._sendBuffer.length) {
                     const promise = this._send(buf);
 
-                    if (typeof data === 'string') {
-                        this._sendBuffer.write(data, this._sendBufferOffset);
-                    } else {
-                        data.copy(this._sendBuffer, this._sendBufferOffset);
-                    }
+                    this._sendBuffer.write(data, this._sendBufferOffset);
                     this._sendBufferOffset = newOffset;
 
                     if (this._sendIntervalTimer === null) {
@@ -888,16 +894,12 @@ export class CarbonClient {
                         // if at all possible don't exceed sendBufferSize in one send using UDP
                         return this._send(buf).then(() => this._send(data));
                     }
-                    return this._send(Buffer.concat([ buf, typeof data === 'string' ? Buffer.from(data) : data ]));
+                    return this._send(Buffer.concat([ buf, Buffer.from(data) ]));
                 }
             }
 
             if (newOffset < this._sendBuffer.length) {
-                if (typeof data === 'string') {
-                    this._sendBuffer.write(data, this._sendBufferOffset);
-                } else {
-                    data.copy(this._sendBuffer, this._sendBufferOffset);
-                }
+                this._sendBuffer.write(data, this._sendBufferOffset);
                 this._sendBufferOffset = newOffset;
 
                 if (this._sendIntervalTimer === null) {
@@ -920,53 +922,65 @@ export class CarbonClient {
     private _send(data: string|Buffer, callback?: (error?: Error) => void): Promise<void>|void {
         const executor = (resolve: () => void, reject: (error: Error) => void): void => {
             try {
-                const socketCallback = (error?: Error|null) => {
+                let sendRetryCount = 0;
+                const sendCallback = (error?: Error|null) => {
+                    console.log('send callback', typeof data === 'string' ? data : data.toString('utf-8'), error);
                     if (error) {
-                        if (this.retryOnError) {
+                        if (this._socket && sendRetryCount < this.retryOnError) {
+                            ++ sendRetryCount;
                             setTimeout(() => {
-                                if (this._socket || this.autoConnect) {
-                                    this._bufferedSend(data);
+                                if (this._socket) {
+                                    doSend();
+                                } else {
+                                    reject(error);
                                 }
                             }, this.retryTimeout);
+                            return;
                         }
                         return reject(error);
                     }
                     resolve();
                 };
 
+                const doSend = () => {
+                    if (!this._socket) {
+                        return reject(new Error('socket gone before could send data'));
+                    }
+
+                    if (this._socket instanceof DgramSocket) {
+                        this._socket.send(data, sendCallback);
+                    } else {
+                        this._socket.write(data, sendCallback);
+                    }
+                };
+
                 if (!this._socket) {
                     if (this.autoConnect) {
-                        return this.connect(error => {
+                        let connectRetryCount = 0;
+                        const connectCallback = (error?: Error|null) => {
                             if (error) {
-                                if (this.retryOnError) {
+                                if (connectRetryCount < this.retryOnError) {
+                                    ++ connectRetryCount;
                                     setTimeout(() => {
-                                        if (this._socket || this.autoConnect) {
-                                            this._bufferedSend(data);
+                                        if (this._socket) {
+                                            doSend();
+                                        } else {
+                                            this.connect(connectCallback);
                                         }
                                     }, this.retryTimeout);
+                                    return;
                                 }
                                 return reject(error);
                             }
 
-                            if (!this._socket) {
-                                return reject(new Error('socket gone before could send data'));
-                            }
-
-                            if (this._socket instanceof DgramSocket) {
-                                this._socket.send(data, socketCallback);
-                            } else {
-                                this._socket.write(data, socketCallback);
-                            }
-                        });
+                            doSend();
+                        };
+                        return this.connect(connectCallback);
                     }
                     return reject(new Error('not connected'));
                 }
 
-                if (this._socket instanceof DgramSocket) {
-                    this._socket.send(data, socketCallback);
-                } else {
-                    this._socket.write(data, socketCallback);
-                }
+                doSend();
             } catch (error) {
                 reject(error instanceof Error ? error : new Error(String(error)));
             }
