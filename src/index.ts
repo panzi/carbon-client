@@ -85,7 +85,7 @@ export interface CarbonClientOptions {
     retryOnError?: number;
 
     /**
-     * Time to wait before retrying after error.
+     * Time to wait before retrying after error. Defaults to [[DEFAULT_RETRY_TIMEOUT]].
      * 
      * @see [[CarbonClient.retryTimeout]]
      */
@@ -315,7 +315,7 @@ export class CarbonClient {
     retryOnError: number = 0;
 
     /**
-     * Time to wait before retrying after error.
+     * Time to wait before retrying after error. Defaults to [[DEFAULT_RETRY_TIMEOUT]].
      * 
      * @see [[CarbonClient.retryOnError]]
      */
