@@ -461,6 +461,7 @@ export class CarbonClient {
                     this._socket.off('error', this._onError);
                     if (this.transport === 'TCP' || this.transport === 'IPC') {
                         this._socket.off('close', this._onClose);
+                        this._socket.off('end', this._onCloseOk);
                     } else {
                         this._socket.off('close', this._onCloseOk);
                     }
@@ -555,6 +556,7 @@ export class CarbonClient {
             this._socket = new NetSocket({ writable: true });
 
             this._socket.on('close', this._onClose);
+            this._socket.on('end', this._onCloseOk);
         } else {
             if (this.family === undefined) {
                 const dnsExecutor = (resolve: () => void, reject: (error: Error) => void): void => {
@@ -633,7 +635,9 @@ export class CarbonClient {
     /**
      * Disconnect the client from the server.
      * 
-     * Also flushes unsent data, if any.
+     * **NOTE:** If you want currently buffered data to be sent before disconenct you need
+     * to call flush() first! Calling disconnect() cancels currently ongoing connection
+     * and send attempts.
      * 
      * This alternative exists because awaiting promises on graceful shutdown
      * seems to not work (the await never returns and the process just quits).
@@ -675,7 +679,7 @@ export class CarbonClient {
                 if (this._socket instanceof DgramSocket) {
                     this._socket.close(resolve);
                 } else {
-                    this._socket.end(() => {
+                    const doDisconnect = () => {
                         try {
                             if (this._socket instanceof NetSocket) {
                                 this._socket.destroy();
@@ -684,7 +688,17 @@ export class CarbonClient {
                             return reject(error instanceof Error ? error : new Error(String(error)));
                         }
                         resolve();
-                    });
+                    };
+
+                    if (this._socket.connecting || !this._socket.writable) {
+                        // If the server went away doring connecting .end() never calles the callback (or waits for a TCP timeout?).
+                        // Since we haven't (half-)sent anything if we're still connecting just kill the connection now. That is
+                        // consistent with the description requiring a manual flush() if we want buffered data to be flushed before
+                        // disconnect.
+                        doDisconnect();
+                    } else {
+                        this._socket.end(doDisconnect);
+                    }
                 }
             } catch (error) {
                 return reject(error instanceof Error ? error : new Error(String(error)));
