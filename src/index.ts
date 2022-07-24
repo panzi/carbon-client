@@ -486,6 +486,26 @@ export class CarbonClient {
      * @throws Error if connected and [[CarbonClient.autoConnect]] is `false`.
      */
     connect(callback?: (error?: Error) => void): Promise<void>|void {
+        if (this._connectionWaiters !== null) {
+            // this._connectWithRetry() in progress, attach to that
+            if (callback) {
+                this._connectionWaiters.push(callback);
+                return;
+            } else {
+                return new Promise((resolve, reject) => {
+                    this._connectionWaiters!.push(error => error ? reject(error) : resolve());
+                });
+            }
+        }
+
+        return this._connect(callback);
+    }
+
+    private _connect(): Promise<void>;
+    private _connect(callback: (error?: Error) => void): void;
+    private _connect(callback?: (error?: Error) => void): Promise<void>|void;
+
+    private _connect(callback?: (error?: Error) => void): Promise<void>|void {
         if (this._socket) {
             if (this.autoConnect) {
                 if (callback) {
@@ -650,37 +670,50 @@ export class CarbonClient {
 
     disconnect(callback?: (error?: Error) => void): Promise<void>|void {
         const executor = (resolve: () => void, reject: (error: Error) => void): void => {
-            this.flush(error => {
-                if (error) {
-                    return reject(error);
+            const doDisconnect = (error?: Error) => {
+                if (error && !this._socket) {
+                    // the in progress _connectWithRetry() failed, let disconnect() succeed
+                    return resolve();
                 }
 
-                if (!this._socket) {
-                    if (this.autoConnect) {
-                        return resolve();
+                this.flush(error => {
+                    if (error) {
+                        return reject(error);
                     }
-                    return reject(new Error('not connected'));
-                }
 
-                try {
-                    if (this._socket instanceof DgramSocket) {
-                        this._socket.close(resolve);
-                    } else {
-                        this._socket.end(() => {
-                            try {
-                                if (this._socket instanceof NetSocket) {
-                                    this._socket.destroy();
+                    if (!this._socket) {
+                        if (this.autoConnect) {
+                            return resolve();
+                        }
+                        return reject(new Error('not connected'));
+                    }
+
+                    try {
+                        if (this._socket instanceof DgramSocket) {
+                            this._socket.close(resolve);
+                        } else {
+                            this._socket.end(() => {
+                                try {
+                                    if (this._socket instanceof NetSocket) {
+                                        this._socket.destroy();
+                                    }
+                                } catch (error) {
+                                    return reject(error instanceof Error ? error : new Error(String(error)));
                                 }
-                            } catch (error) {
-                                return reject(error instanceof Error ? error : new Error(String(error)));
-                            }
-                            resolve();
-                        });
+                                resolve();
+                            });
+                        }
+                    } catch (error) {
+                        return reject(error instanceof Error ? error : new Error(String(error)));
                     }
-                } catch (error) {
-                    return reject(error instanceof Error ? error : new Error(String(error)));
-                }
-            });
+                });
+            };
+
+            if (this._connectionWaiters !== null) {
+                this._connectionWaiters.push(doDisconnect);
+            } else {
+                doDisconnect();
+            }
         };
 
         if (callback) {
@@ -916,6 +949,73 @@ export class CarbonClient {
         }
     }
 
+    private _connectionRetryTimer: NodeJS.Timeout|null = null;
+    private _connectionWaiters: ((error?: Error) => void)[]|null = null;
+
+    private _connectDone(error?: Error): void {
+        if (this._connectionRetryTimer !== null) {
+            clearTimeout(this._connectionRetryTimer);
+            this._connectionRetryTimer = null;
+        }
+        const waiters = this._connectionWaiters;
+        this._connectionWaiters = null;
+        if (waiters) {
+            for (const waiter of waiters) {
+                try {
+                    waiter(error);
+                } catch (error2) {
+                    setImmediate(() =>
+                        this._emit(
+                            'error',
+                            error2 instanceof Error ? error2 : new Error(String(error2))));
+                }
+            }
+        }
+    }
+
+    private _connectWithRetry(): Promise<void>;
+    private _connectWithRetry(callback: (error?: Error) => void): void;
+
+    private _connectWithRetry(callback?: (error?: Error) => void): Promise<void>|void {
+        let retryCount = 0;
+        const connectCallback = (error?: Error) => {
+            if (error) {
+                if (retryCount < this.retryOnError) {
+                    ++ retryCount;
+                    this._connectionRetryTimer = setTimeout(() => {
+                        this._connectionRetryTimer = null;
+                        if (this._socket) {
+                            this._connectDone();
+                        } else {
+                            this._connect(connectCallback);
+                        }
+                    });
+                    return;
+                }
+                return this._connectDone(error);
+            }
+            this._connectDone();
+        };
+
+        if (callback) {
+            if (this._connectionWaiters === null) {
+                this._connectionWaiters = [callback];
+                this._connect(connectCallback);
+            } else {
+                this._connectionWaiters.push(callback);
+            }
+        } else {
+            return new Promise((resolve, reject) => {
+                if (this._connectionWaiters === null) {
+                    this._connectionWaiters = [ error => error ? reject(error) : resolve() ];
+                    this._connect(connectCallback);
+                } else {
+                    this._connectionWaiters.push(error => error ? reject(error) : resolve());
+                }
+            });
+        }
+    }
+
     private _send(data: string|Buffer): Promise<void>;
     private _send(data: string|Buffer, callback: (error?: Error) => void): void;
 
@@ -955,26 +1055,12 @@ export class CarbonClient {
 
                 if (!this._socket) {
                     if (this.autoConnect) {
-                        let connectRetryCount = 0;
-                        const connectCallback = (error?: Error|null) => {
+                        return this._connectWithRetry(error => {
                             if (error) {
-                                if (connectRetryCount < this.retryOnError) {
-                                    ++ connectRetryCount;
-                                    setTimeout(() => {
-                                        if (this._socket) {
-                                            doSend();
-                                        } else {
-                                            this.connect(connectCallback);
-                                        }
-                                    }, this.retryTimeout);
-                                    return;
-                                }
                                 return reject(error);
                             }
-
                             doSend();
-                        };
-                        return this.connect(connectCallback);
+                        });
                     }
                     return reject(new Error('not connected'));
                 }

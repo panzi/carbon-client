@@ -1000,7 +1000,7 @@ describe('Server Offline', () => {
 });
 
 describe('Retry On Error', () => {
-    const key = 'host.server.key';
+    const key = 'host.server.SUCCESS';
     const value = 123;
     const timestamp = new Date(DATE_TIME_1_STR);
     const expectedLine = `${key} ${value} ${unixTime(DATE_TIME_1_STR)}\n`;
@@ -1018,7 +1018,6 @@ describe('Retry On Error', () => {
                 client.on('error', error => {
                     errors.push(error);
                 });
-
                 client.vwrite(key, value, timestamp);
 
                 await sleep(25);
@@ -1027,10 +1026,8 @@ describe('Retry On Error', () => {
                 try {
                     await listen(server);
                     const promise = receive(server);
-
                     await sleep(25);
                     await client.disconnect();
-
                     expect((await promise).toString()).toStrictEqual(expectedLine);
                 } finally {
                     if (server.listening) {
@@ -1042,18 +1039,17 @@ describe('Retry On Error', () => {
 
                 if (buffered) {
                     errors = [];
-                    await client.write('host.server.key2', 123);
+                    client.vwrite('host.server.ERROR', 123);
                     await sleep(25);
                     expect(errors.length).toBeGreaterThan(0);
                     expect(errors[0]).toMatchObject({
                         code: errorCode
                     });
                 } else {
-                    await expect(client.write('host.server.key2', 123)).rejects.toMatchObject({
+                    await expect(client.write('host.server.ERROR', 123)).rejects.toMatchObject({
                         code: errorCode
                     });
                 }
-
                 await client.disconnect();
             }
 
@@ -1064,8 +1060,8 @@ describe('Retry On Error', () => {
                     transport: 'TCP',
                     sendBufferSize,
                     sendInterval: 2,
-                    retryOnError: 5,
-                    retryTimeout: 10,
+                    retryOnError: 15,
+                    retryTimeout: 15,
                     autoConnect: true,
                 });
                 await doTest(client, server => listenTCP(server, port, 'localhost'), 'ECONNREFUSED');
@@ -1077,8 +1073,8 @@ describe('Retry On Error', () => {
                     transport: 'IPC',
                     sendBufferSize,
                     sendInterval: 2,
-                    retryOnError: 5,
-                    retryTimeout: 10,
+                    retryOnError: 15,
+                    retryTimeout: 15,
                     autoConnect: true,
                 });
                 await doTest(client, server => listenIPC(server, pipe), 'ENOENT');
