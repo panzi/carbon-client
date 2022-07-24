@@ -248,7 +248,7 @@ interface Callbacks<Callback extends Function> {
  * it is clear that the path may not contain any whitespace. Also since the tags are
  * just appended to the path name using `;` as a delimiter between the path and the
  * tags and `=` between tag name and value these characters can clearly also no occur
- * in path names. Also the whisper server seems to store metric on the filesystem
+ * in path names. Further the whisper server seems to store metric on the filesystem
  * by splitting it on `.` and creating a filesystem hierarchy based on the split
  * path comonents. That means paths better not contain any characters not allowed
  * in file names of any common operating systems. Also no double-`.`, leading-`.`
