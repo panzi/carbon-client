@@ -223,10 +223,6 @@ function appendTags(buf: string[]|(string|number)[], tags: Tags): void {
     }
 }
 
-function sleep(milliseconds: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, milliseconds));
-}
-
 interface CallbackInfo<Callback extends Function> {
     callback: Callback;
     once: boolean;
@@ -393,7 +389,7 @@ export class CarbonClient {
      * @param autoConnect automatically connect on write if not connected, `false` if not given
      * 
      * @throws [[IllegalArgument]]
-     * @throws [[TypeError]]
+     * @throws `TypeError`
      */
     constructor(address: string, port?: number, transport?: IPTransport, autoConnect?: boolean);
 
@@ -404,7 +400,7 @@ export class CarbonClient {
      * @param autoConnect automatically connect on write if not connected, `false` if not given
      * 
      * @throws [[IllegalArgument]]
-     * @throws [[TypeError]]
+     * @throws `TypeError`
      */
     constructor(path: string, transport: 'IPC', autoConnect?: boolean);
 
@@ -555,9 +551,9 @@ export class CarbonClient {
      * @throws [[HostNotFound]] if the host referred to by [[CarbonClient.address]] cannot be resolved.
      * @throws [[Disconnected]] if [[CarbonClient.disconnect]] is called while connect is in progress.
      * @throws [[SocketGone]] if the socket goes away during the operation. (*should never happen*)
-     * @throws [[TypeError]] if the socket changes type ([[DgramSocket]] <-> [[NetSocket]]) during
+     * @throws `TypeError` if the socket changes type (`DgramSocket` <-> `NetSocket`) during
      *         the operation. (*should never happen*)
-     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
+     * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     connect(callback?: (error?: Error) => void): Promise<void>|void {
         return this._connectWithRetry(0, callback);
@@ -718,7 +714,7 @@ export class CarbonClient {
      * 
      * @param callback Async callback for when the client is disconnected or an error during disconnect occured.
      * 
-     * @throws Error if not connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws `Error` if not connected and [[CarbonClient.autoConnect]] is `false`.
      */
     disconnect(callback: (error?: Error) => void): void;
 
@@ -732,7 +728,7 @@ export class CarbonClient {
      * Await the returned promise to wait for the disconnect to finish.
      * 
      * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
-     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
+     * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     disconnect(): Promise<void>;
 
@@ -795,7 +791,7 @@ export class CarbonClient {
      * Safe to call even if [[CarbonClient.isBuffered]] is `false`.
      * 
      * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
-     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
+     * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     flush(callback?: (error?: Error) => void): Promise<void>|void {
         const executor = (resolve: () => void, reject: (error: Error) => void): void => {
@@ -1146,7 +1142,7 @@ export class CarbonClient {
     /**
      * Send a metric to the carbon server.
      * 
-     * @returns Promise that returns when the metric is sent.
+     * @returns Promise that resolves when the metric is sent.
      */
     write(path: string, value: number, timestamp: Date, tags?: Tags): Promise<void>;
 
@@ -1156,18 +1152,18 @@ export class CarbonClient {
      * The current time (via `Date.now()`) will be used.
      * 
      * **NOTE:** If [[CarbonClient.sendBufferSize]] is `> 0` then any error (except for
-     * [[IllegalArgument]]) might not happen during `await` of the returned Promise, but
+     * [[IllegalArgument]]) might not happen during `await` of the returned `Promise`, but
      * will only dispatched to any registered error handlers. See: [[CarbonClient.on]]
      * 
      * Also note that if the sent data doesn't fit into the buffer, this will issue a
      * send immediately and any promise rejections of that send *will* be directly returned
-     * when `await`ing the returned Promise.
+     * when `await`ing the returned `Promise`.
      * 
-     * @returns Promise that returns when the metric is sent.
+     * @returns Promise that resolves when the metric is sent.
      * @throws [[IllegalArgument]]
      * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
      * @throws [[SocketGone]] if socket went away during the operation.
-     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
+     * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     write(path: string, value: number, tags?: Tags): Promise<void>;
 
@@ -1228,9 +1224,9 @@ export class CarbonClient {
      * 
      * @param batch The metrics to write.
      * @param timestamp The timestamp to use for metrics that don't define it directly.
-     * @returns Promise that returns when the metric is sent.
+     * @returns Promise that resolves when the metric is sent.
      * @throws [[IllegalArgument]]
-     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
+     * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     async batchWrite(batch: MetricMap|MetricTuple[], timestamp?: Date): Promise<void> {
         const buf: (string|number)[] = [];
