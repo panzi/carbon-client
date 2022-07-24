@@ -361,14 +361,14 @@ export class CarbonClient {
      * 
      * @see [[CarbonClient.retryTimeout]]
      */
-    retryOnError: number = 0;
+    readonly retryOnError: number = 0;
 
     /**
      * Time to wait before retrying after error. Defaults to [[DEFAULT_RETRY_TIMEOUT]].
      * 
      * @see [[CarbonClient.retryOnError]]
      */
-    retryTimeout: number = DEFAULT_RETRY_TIMEOUT;
+    readonly retryTimeout: number = DEFAULT_RETRY_TIMEOUT;
 
     private _socket: NetSocket|DgramSocket|null = null;
     private _callbacks: { [key in keyof EventMap]: Callbacks<EventMap[key]> } = {
@@ -734,6 +734,11 @@ export class CarbonClient {
 
     disconnect(callback?: (error?: Error) => void): Promise<void>|void {
         const executor = (resolve: () => void, reject: (error: Error) => void): void => {
+            if (this._sendIntervalTimer !== null) {
+                clearTimeout(this._sendIntervalTimer);
+                this._sendIntervalTimer = null;
+            }
+
             if (this._connectionWaiters !== null) {
                 this._connectDone(new Disconnected());
             }
