@@ -51,6 +51,10 @@ await client.batchWrite({
     'foo.bar.key4': { value: 1, timestamp: new Date('2022-04-01T16:00:00+0200'), tags: { tag2: 'value2' } }],
 });
 
+// If you use a sendBufferSize > 0 (default: 0), flush before
+// you disconnect to make sure anything buffered is sent.
+await client.flush();
+
 await client.disconnect();
 ```
 
