@@ -380,6 +380,8 @@ export class CarbonClient {
     private readonly _sendBuffer?: Buffer;
     private _sendBufferOffset: number = 0;
     private _sendIntervalTimer: NodeJS.Timeout|null = null;
+    private _connectionRetryTimer: NodeJS.Timeout|null = null;
+    private _connectionCallbacks: ((error?: Error) => void)[]|null = null;
 
     /**
      * 
@@ -739,7 +741,7 @@ export class CarbonClient {
                 this._sendIntervalTimer = null;
             }
 
-            if (this._connectionWaiters !== null) {
+            if (this._connectionCallbacks !== null) {
                 this._connectDone(new Disconnected());
             }
 
@@ -1014,20 +1016,17 @@ export class CarbonClient {
         }
     }
 
-    private _connectionRetryTimer: NodeJS.Timeout|null = null;
-    private _connectionWaiters: ((error?: Error) => void)[]|null = null;
-
     private _connectDone(error?: Error): void {
         if (this._connectionRetryTimer !== null) {
             clearTimeout(this._connectionRetryTimer);
             this._connectionRetryTimer = null;
         }
-        const waiters = this._connectionWaiters;
-        this._connectionWaiters = null;
-        if (waiters) {
-            for (const waiter of waiters) {
+        const callbacks = this._connectionCallbacks;
+        this._connectionCallbacks = null;
+        if (callbacks) {
+            for (const callback of callbacks) {
                 try {
-                    waiter(error);
+                    callback(error);
                 } catch (error2) {
                     setImmediate(() =>
                         this._emit(
@@ -1052,7 +1051,7 @@ export class CarbonClient {
                         this._connectionRetryTimer = null;
                         if (this._socket) {
                             this._connectDone();
-                        } else if (this._connectionWaiters !== null) {
+                        } else if (this._connectionCallbacks !== null) {
                             this._connect(connectCallback);
                         }
                     });
@@ -1064,19 +1063,19 @@ export class CarbonClient {
         };
 
         if (callback) {
-            if (this._connectionWaiters === null) {
-                this._connectionWaiters = [callback];
+            if (this._connectionCallbacks === null) {
+                this._connectionCallbacks = [callback];
                 this._connect(connectCallback);
             } else {
-                this._connectionWaiters.push(callback);
+                this._connectionCallbacks.push(callback);
             }
         } else {
             return new Promise((resolve, reject) => {
-                if (this._connectionWaiters === null) {
-                    this._connectionWaiters = [ error => error ? reject(error) : resolve() ];
+                if (this._connectionCallbacks === null) {
+                    this._connectionCallbacks = [ error => error ? reject(error) : resolve() ];
                     this._connect(connectCallback);
                 } else {
-                    this._connectionWaiters.push(error => error ? reject(error) : resolve());
+                    this._connectionCallbacks.push(error => error ? reject(error) : resolve());
                 }
             });
         }
