@@ -1148,6 +1148,10 @@ export class CarbonClient {
      * Send a metric to the carbon server.
      * 
      * @returns Promise that resolves when the metric is sent.
+     * @throws [[IllegalArgument]] if path, timestamp, a tag-name, or a tag-value is invalid.
+     * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[SocketGone]] if socket went away during the operation.
+     * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     write(path: string, value: number, timestamp: Date, tags?: Tags): Promise<void>;
 
@@ -1165,7 +1169,7 @@ export class CarbonClient {
      * when `await`ing the returned `Promise`.
      * 
      * @returns Promise that resolves when the metric is sent.
-     * @throws [[IllegalArgument]]
+     * @throws [[IllegalArgument]] if path, a tag-name, or a tag-value is invalid.
      * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
      * @throws [[SocketGone]] if socket went away during the operation.
      * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
@@ -1230,7 +1234,7 @@ export class CarbonClient {
      * @param batch The metrics to write.
      * @param timestamp The timestamp to use for metrics that don't define it directly.
      * @returns Promise that resolves when the metric is sent.
-     * @throws [[IllegalArgument]]
+     * @throws [[IllegalArgument]] if a path, a timestamp, a tag-name, or a tag-value is invalid.
      * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     async batchWrite(batch: MetricMap|MetricTuple[], timestamp?: Date): Promise<void> {
