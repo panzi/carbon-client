@@ -766,7 +766,7 @@ export class CarbonClient {
                     };
 
                     if (this._socket.connecting || !this._socket.writable) {
-                        // If the server went away doring connecting .end() never calles the callback (or waits for a TCP timeout?).
+                        // If the server went away during connecting .end() never calles the callback (or waits for a TCP timeout?).
                         // Since we haven't (half-)sent anything if we're still connecting just kill the connection now. That is
                         // consistent with the description requiring a manual flush() if we want buffered data to be flushed before
                         // disconnect.
