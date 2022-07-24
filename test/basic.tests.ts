@@ -639,6 +639,7 @@ describe('Write Metrics', () => {
         await client.write(metrics[0][0], metrics[0][1], metrics[0][2] as Date, metrics[0][3]);
         if (client.isBuffered) {
             await client.write(metrics[1][0], metrics[1][1], metrics[1][2] as Date);
+            await client.flush();
         }
         await client.disconnect();
         if (client.isBuffered) {
@@ -653,6 +654,7 @@ describe('Write Metrics', () => {
         promise = receive();
         await client.connect();
         await client.batchWrite(metrics);
+        await client.flush();
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
@@ -662,6 +664,7 @@ describe('Write Metrics', () => {
         promise = receive();
         await client.connect();
         await client.batchWrite(metricsMap);
+        await client.flush();
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
@@ -686,6 +689,7 @@ describe('Write Metrics', () => {
         await sleep(client.sendInterval + extraWait);
         expect(client.bufferedBytes).toBe(0);
 
+        await client.flush();
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedLines[0] + expectedLines[1]);
         await whenClosed;
@@ -700,6 +704,7 @@ describe('Write Metrics', () => {
         await sleep(client.sendInterval + extraWait);
         expect(client.bufferedBytes).toBe(0);
 
+        await client.flush();
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
@@ -714,6 +719,7 @@ describe('Write Metrics', () => {
         await sleep(client.sendInterval + extraWait);
         expect(client.bufferedBytes).toBe(0);
 
+        await client.flush();
         await client.disconnect();
         expect((await promise).toString()).toBe(expectedBatch);
         await whenClosed;
@@ -838,6 +844,7 @@ describe('Write Metrics', () => {
 
                 await client.connect();
                 await client.write('baz', 1, new Date(DATE_TIME_1_STR));
+                await client.flush();
                 await client.disconnect();
                 expect((await promise).toString()).toBe(`${prefix}baz 1 ${unixTime(DATE_TIME_1_STR)}\n`);
                 await whenClosed;
@@ -848,7 +855,8 @@ describe('Write Metrics', () => {
                 await client.batchWrite([
                     ['baz', 1],
                     ['egg.bacon', 2],
-                ], new Date(DATE_TIME_1_STR))
+                ], new Date(DATE_TIME_1_STR));
+                await client.flush();
                 await client.disconnect();
                 expect((await promise).toString()).toBe(
                     `${prefix}baz 1 ${unixTime(DATE_TIME_1_STR)}\n`+
@@ -862,7 +870,8 @@ describe('Write Metrics', () => {
                 await client.batchWrite({
                     'baz': 1,
                     'egg.bacon': 2,
-                }, new Date(DATE_TIME_1_STR))
+                }, new Date(DATE_TIME_1_STR));
+                await client.flush();
                 await client.disconnect();
                 expect((await promise).toString()).toBe(
                     `${prefix}baz 1 ${unixTime(DATE_TIME_1_STR)}\n`+
@@ -1027,6 +1036,7 @@ describe('Retry On Error', () => {
                     await listen(server);
                     const promise = receive(server);
                     await sleep(25);
+                    await client.flush();
                     await client.disconnect();
                     expect((await promise).toString()).toStrictEqual(expectedLine);
                 } finally {
@@ -1050,6 +1060,7 @@ describe('Retry On Error', () => {
                         code: errorCode
                     });
                 }
+                await client.flush();
                 await client.disconnect();
             }
 
@@ -1200,6 +1211,7 @@ describe('Auto-Connect', () => {
                 const whenClosed = waitEvent(client, 'close');
 
                 await client.write(metric[0], metric[1], metric[2] as Date, metric[3]);
+                await client.flush();
                 await client.disconnect();
                 expect((await promise).toString()).toStrictEqual(expectedLine);
                 await whenClosed;
@@ -1224,6 +1236,7 @@ describe('Auto-Connect', () => {
                     whenClosed = waitEvent(client, 'close');
 
                     await client.write(metric[0], metric[1], metric[2] as Date, metric[3]);
+                    await client.flush();
                     await client.disconnect();
                     expect((await promise).toString()).toStrictEqual(expectedLine);
                     await whenClosed;
@@ -1298,6 +1311,7 @@ describe('Auto-Connect', () => {
                     autoConnect: true,
                     sendBufferSize,
                 });
+                await client.flush();
                 await client.disconnect();
 
                 // UDP cannot connect server disconnect (because there's no such concept)
