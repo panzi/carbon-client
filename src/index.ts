@@ -482,7 +482,15 @@ export class CarbonClient {
     /**
      * Connect client to server.
      * 
-     * This creates and connects the underlying socket.
+     * This creates and connects the underlying socket. If there is another `connect()` in progress
+     * it will attach to that. If that other `connect()` is performed in the context of an auto-connect
+     * ([[CarbonClient.autoConnect]] is `true`) and [[CarbonClient.retryOnError]] is `> 0` then this
+     * means this `connect()` call will wait until all the retries are finished. Note that normally
+     * `connect()` only performs one connection attempt, even if [[CarbonClient.retryOnError]] is `> 0`.
+     * 
+     * Also, if you manually call `connect()` right before a send is happening in the background, that
+     * send will attach to this `connect()` and as such will not retry on connection failure, even if
+     * [[CarbonClient.retryOnError]] is `> 0`.
      * 
      * @throws Error if connected and [[CarbonClient.autoConnect]] is `false`.
      */
