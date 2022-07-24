@@ -1037,6 +1037,10 @@ describe('Retry On Error', () => {
                     const promise = receive(server);
                     await sleep(25);
                     await client.flush();
+
+                    // Without this sleep the `await promise` below hangs sometimes.
+                    await sleep(25);
+
                     await client.disconnect();
                     expect((await promise).toString()).toStrictEqual(expectedLine);
                 } finally {
@@ -1060,7 +1064,6 @@ describe('Retry On Error', () => {
                         code: errorCode
                     });
                 }
-                await client.flush();
                 await client.disconnect();
             }
 
