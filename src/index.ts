@@ -2,6 +2,59 @@ import { Socket as NetSocket } from 'net';
 import { Socket as DgramSocket, createSocket as createDgramSocket } from 'dgram';
 import * as dns from 'dns';
 
+export abstract class CarbonClientError extends Error {
+    constructor(message: string) {
+        super(message);
+
+        // The JavaScript Error class is weird and doesn't behave quite like one
+        // would expect when subclassed. For that we make our own base class
+        // and manually set the name and capture the stack trace. Otherwise the
+        // fields name and stack will contain 'Error' and the place where the Error
+        // class was subclassed!
+        this.name = this.constructor.name;
+        Error.captureStackTrace(this, this.constructor);
+    }
+}
+
+export class NotConnected extends CarbonClientError {
+    constructor(message?: string) {
+        super(message ?? 'not connected');
+    }
+}
+
+export class AlreadyConnected extends CarbonClientError {
+    constructor(message?: string) {
+        super(message ?? 'already connected');
+    }
+}
+
+export class Disconnected extends CarbonClientError {
+    constructor(message?: string) {
+        super(message ?? 'disconnected');
+    }
+}
+
+export class SocketGone extends CarbonClientError {
+    constructor(message?: string) {
+        super(message ?? 'socket gone');
+    }
+}
+
+export class HostNotFound extends CarbonClientError {
+    readonly hostname: string;
+
+    constructor(hostname: string) {
+        super(`host not found: ${hostname}`);
+        this.hostname = hostname;
+    }
+}
+
+export class IllegalArgument extends CarbonClientError {
+    constructor(message?: string) {
+        super(message ?? 'illegal argument');
+    }
+}
+
 /**
  * @ignore
  */
@@ -159,11 +212,11 @@ function appendTags(buf: string[]|(string|number)[], tags: Tags): void {
         const value = tags[tag];
 
         if (!TAG_NAME_REGEXP.test(tag)) {
-            throw new Error(`illegal tag name: ${JSON.stringify(tag)}`);
+            throw new IllegalArgument(`illegal tag name: ${JSON.stringify(tag)}`);
         }
 
         if (!TAG_VALUE_REGEXP.test(value)) {
-            throw new Error(`illegal tag value: ${tag}=${JSON.stringify(value)}`);
+            throw new IllegalArgument(`illegal tag value: ${tag}=${JSON.stringify(value)}`);
         }
 
         buf.push(';', tag, '=', value);
@@ -338,6 +391,9 @@ export class CarbonClient {
      * @param port port of carbon server, [[DEFAULT_PORT]] if not given
      * @param transport transport layer protocol to use, [[DEFAULT_TRANSPORT]] if not given
      * @param autoConnect automatically connect on write if not connected, `false` if not given
+     * 
+     * @throws [[IllegalArgument]]
+     * @throws [[TypeError]]
      */
     constructor(address: string, port?: number, transport?: IPTransport, autoConnect?: boolean);
 
@@ -346,6 +402,9 @@ export class CarbonClient {
      * @param path path of Unix domain socket
      * @param transport always `'IPC'`
      * @param autoConnect automatically connect on write if not connected, `false` if not given
+     * 
+     * @throws [[IllegalArgument]]
+     * @throws [[TypeError]]
      */
     constructor(path: string, transport: 'IPC', autoConnect?: boolean);
 
@@ -363,42 +422,42 @@ export class CarbonClient {
 
             if (prefix) {
                 if (!PREFIX_REGEXP.test(prefix)) {
-                    throw new Error(`illegal prefix: ${JSON.stringify(prefix)}`);
+                    throw new IllegalArgument(`illegal prefix: ${JSON.stringify(prefix)}`);
                 }
                 this.prefix = prefix;
             }
 
             if (sendBufferSize != undefined) {
                 if (!isFinite(sendBufferSize) || sendBufferSize < 0 || (sendBufferSize|0) !== sendBufferSize) {
-                    throw new Error(`illegal sendBufferSize: ${sendBufferSize}`);
+                    throw new IllegalArgument(`illegal sendBufferSize: ${sendBufferSize}`);
                 }
                 this.sendBufferSize = sendBufferSize;
             }
 
             if (transport === 'UDP' && udpSendBufferSize != undefined) {
                 if (!isFinite(udpSendBufferSize) || udpSendBufferSize <= 0 || (udpSendBufferSize|0) !== udpSendBufferSize) {
-                    throw new Error(`illegal udpSendBufferSize: ${udpSendBufferSize}`);
+                    throw new IllegalArgument(`illegal udpSendBufferSize: ${udpSendBufferSize}`);
                 }
                 this.udpSendBufferSize = udpSendBufferSize;
             }
 
             if (sendInterval != undefined) {
                 if (!isFinite(sendInterval) || sendInterval < 0) {
-                    throw new Error(`illegal sendInterval: ${sendInterval}`);
+                    throw new IllegalArgument(`illegal sendInterval: ${sendInterval}`);
                 }
                 this.sendInterval = sendInterval;
             }
 
             if (retryOnError != undefined) {
                 if (!isFinite(retryOnError) || retryOnError < 0 || (retryOnError|0) !== retryOnError) {
-                    throw new Error(`illegal retryOnError: ${retryOnError}`);
+                    throw new IllegalArgument(`illegal retryOnError: ${retryOnError}`);
                 }
                 this.retryOnError = retryOnError;
             }
 
             if (retryTimeout != undefined) {
                 if (!isFinite(retryTimeout) || retryTimeout < 0) {
-                    throw new Error(`illegal retryTimeout: ${retryTimeout}`);
+                    throw new IllegalArgument(`illegal retryTimeout: ${retryTimeout}`);
                 }
                 this.retryTimeout = retryTimeout;
             }
@@ -434,7 +493,7 @@ export class CarbonClient {
         if (this.transport !== 'IPC') {
             const { port } = this;
             if (port <= 0 || !isFinite(port) || (port|0) !== port || port > 65_535) {
-                throw new Error(`illegal port number: ${port}`);
+                throw new IllegalArgument(`illegal port number: ${port}`);
             }
         }
 
@@ -492,7 +551,13 @@ export class CarbonClient {
      * send will attach to this `connect()` and as such will not retry on connection failure, even if
      * [[CarbonClient.retryOnError]] is `> 0`.
      * 
-     * @throws Error if connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[AlreadyConnected]] if connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[HostNotFound]] if the host referred to by [[CarbonClient.address]] cannot be resolved.
+     * @throws [[Disconnected]] if [[CarbonClient.disconnect]] is called while connect is in progress.
+     * @throws [[SocketGone]] if the socket goes away during the operation. (*should never happen*)
+     * @throws [[TypeError]] if the socket changes type ([[DgramSocket]] <-> [[NetSocket]]) during
+     *         the operation. (*should never happen*)
+     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     connect(callback?: (error?: Error) => void): Promise<void>|void {
         return this._connectWithRetry(0, callback);
@@ -511,7 +576,7 @@ export class CarbonClient {
                     return Promise.resolve();
                 }
             }
-            const error = new Error('already connected');
+            const error = new AlreadyConnected();
             if (callback) {
                 return callback(error);
             } else {
@@ -523,7 +588,7 @@ export class CarbonClient {
         const executor = (resolve: () => void, reject: (error: Error) => void): void => {
             try {
                 if (!this._socket) {
-                    return reject(new Error('socket gone before could connect'));
+                    return reject(new SocketGone('socket gone before could connect'));
                 }
 
                 this._socket.on('connect', this._onConnect);
@@ -538,7 +603,7 @@ export class CarbonClient {
                 };
                 if (this.transport === 'IPC') {
                     if (this._socket instanceof DgramSocket) {
-                        return reject(new Error('socket changed type!?'));
+                        return reject(new TypeError('socket changed type!?'));
                     }
                     this._socket.once('error', reject);
                     this._socket.connect(address, callback);
@@ -574,7 +639,7 @@ export class CarbonClient {
                         }
                         const adr = addresses.find(adr => adr.family === 6) ?? addresses.find(adr => adr.family === 4);
                         if (!adr) {
-                            return reject(new Error(`host not found: ${this.address}`));
+                            return reject(new HostNotFound(this.address));
                         }
                         address = adr.address;
                         try {
@@ -643,7 +708,7 @@ export class CarbonClient {
     /**
      * Disconnect the client from the server.
      * 
-     * **NOTE:** If you want currently buffered data to be sent before disconenct you need
+     * **NOTE:** If you want currently buffered data to be sent before disconnect you need
      * to call flush() first! Calling disconnect() cancels currently ongoing connection
      * and send attempts.
      * 
@@ -660,27 +725,28 @@ export class CarbonClient {
     /**
      * Disconnect the client from the server.
      * 
-     * **NOTE:** If you want currently buffered data to be sent before disconenct you need
+     * **NOTE:** If you want currently buffered data to be sent before disconnect you need
      * to call flush() first! Calling disconnect() cancels currently ongoing connection
      * and send attempts.
      * 
      * Await the returned promise to wait for the disconnect to finish.
      * 
-     * @throws Error if not connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     disconnect(): Promise<void>;
 
     disconnect(callback?: (error?: Error) => void): Promise<void>|void {
         const executor = (resolve: () => void, reject: (error: Error) => void): void => {
             if (this._connectionWaiters !== null) {
-                this._connectDone(new Error('disconnected'));
+                this._connectDone(new Disconnected());
             }
 
             if (!this._socket) {
                 if (this.autoConnect) {
                     return resolve();
                 }
-                return reject(new Error('not connected'));
+                return reject(new NotConnected());
             }
 
             try {
@@ -728,12 +794,13 @@ export class CarbonClient {
      * 
      * Safe to call even if [[CarbonClient.isBuffered]] is `false`.
      * 
-     * @throws Error if not connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     flush(callback?: (error?: Error) => void): Promise<void>|void {
         const executor = (resolve: () => void, reject: (error: Error) => void): void => {
             if (!this._socket && !this.autoConnect) {
-                return reject(new Error('not connected'));
+                return reject(new NotConnected());
             }
 
             if (this._sendIntervalTimer !== null) {
@@ -897,7 +964,7 @@ export class CarbonClient {
 
     private _bufferedSend(data: string): Promise<void> {
         if (!this._socket && !this.autoConnect) {
-            return Promise.reject(new Error('not connected'));
+            return Promise.reject(new NotConnected());
         }
 
         if (this._sendBuffer) {
@@ -1041,7 +1108,7 @@ export class CarbonClient {
 
                 const doSend = () => {
                     if (!this._socket) {
-                        return reject(new Error('socket gone before could send data'));
+                        return reject(new SocketGone('socket gone before could send data'));
                     }
 
                     if (this._socket instanceof DgramSocket) {
@@ -1060,7 +1127,7 @@ export class CarbonClient {
                             doSend();
                         });
                     }
-                    return reject(new Error('not connected'));
+                    return reject(new NotConnected());
                 }
 
                 doSend();
@@ -1088,13 +1155,25 @@ export class CarbonClient {
      * 
      * The current time (via `Date.now()`) will be used.
      * 
+     * **NOTE:** If [[CarbonClient.sendBufferSize]] is `> 0` then any error (except for
+     * [[IllegalArgument]]) might not happen during `await` of the returned Promise, but
+     * will only dispatched to any registered error handlers. See: [[CarbonClient.on]]
+     * 
+     * Also note that if the sent data doesn't fit into the buffer, this will issue a
+     * send immediately and any promise rejections of that send *will* be directly returned
+     * when `await`ing the returned Promise.
+     * 
      * @returns Promise that returns when the metric is sent.
+     * @throws [[IllegalArgument]]
+     * @throws [[NotConnected]] if not connected and [[CarbonClient.autoConnect]] is `false`.
+     * @throws [[SocketGone]] if socket went away during the operation.
+     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     write(path: string, value: number, tags?: Tags): Promise<void>;
 
     async write(path: string, value: number, arg3?: Date|Tags, arg4?: Tags): Promise<void> {
         if (!PATH_REGEXP.test(path)) {
-            throw new Error(`illegal path: ${JSON.stringify(path)}`);
+            throw new IllegalArgument(`illegal path: ${JSON.stringify(path)}`);
         }
 
         let secs: number;
@@ -1105,7 +1184,7 @@ export class CarbonClient {
             tags = arg4;
 
             if (isNaN(secs)) {
-                throw new Error(`illegal date: ${arg3}`);
+                throw new IllegalArgument(`illegal date: ${arg3}`);
             }
         } else {
             secs = Date.now() / 1000;
@@ -1139,9 +1218,19 @@ export class CarbonClient {
      * 
      * If `timestamp` is not provided the current time (via `Date.now()`) will be used.
      * 
+     * **NOTE:** If [[CarbonClient.sendBufferSize]] is `> 0` then any error (except for
+     * [[IllegalArgument]]) might not happen during `await` of the returned Promise, but
+     * will only dispatched to any registered error handlers. See: [[CarbonClient.on]]
+     * 
+     * Also note that if the sent data doesn't fit into the buffer, this will issue a
+     * send immediately and any promise rejections of that send *will* be directly returned
+     * when `await`ing the returned Promise.
+     * 
      * @param batch The metrics to write.
      * @param timestamp The timestamp to use for metrics that don't define it directly.
      * @returns Promise that returns when the metric is sent.
+     * @throws [[IllegalArgument]]
+     * @throws [[Error]] based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
     async batchWrite(batch: MetricMap|MetricTuple[], timestamp?: Date): Promise<void> {
         const buf: (string|number)[] = [];
@@ -1149,13 +1238,13 @@ export class CarbonClient {
         const { prefix } = this;
 
         if (isNaN(defaultSecs)) {
-            throw new Error(`illegal date: ${timestamp}`);
+            throw new IllegalArgument(`illegal date: ${timestamp}`);
         }
 
         if (Array.isArray(batch)) {
             for (const [path, value, arg3, arg4] of batch) {
                 if (!PATH_REGEXP.test(path)) {
-                    throw new Error(`illegal path: ${JSON.stringify(path)}`);
+                    throw new IllegalArgument(`illegal path: ${JSON.stringify(path)}`);
                 }
 
                 let secs: number;
@@ -1165,7 +1254,7 @@ export class CarbonClient {
                     tags = arg4;
 
                     if (isNaN(secs)) {
-                        throw new Error(`illegal date: ${arg3}`);
+                        throw new IllegalArgument(`illegal date: ${arg3}`);
                     }
                 } else {
                     secs = defaultSecs;
@@ -1183,7 +1272,7 @@ export class CarbonClient {
             for (const path in batch) {
                 const arg = batch[path];
                 if (!PATH_REGEXP.test(path)) {
-                    throw new Error(`illegal path: ${JSON.stringify(path)}`);
+                    throw new IllegalArgument(`illegal path: ${JSON.stringify(path)}`);
                 }
 
                 let value: number;
@@ -1200,7 +1289,7 @@ export class CarbonClient {
                         secs = timestamp.getTime() / 1000;
 
                         if (isNaN(secs)) {
-                            throw new Error(`illegal date: ${timestamp}`);
+                            throw new IllegalArgument(`illegal date: ${timestamp}`);
                         }
                     } else {
                         secs = defaultSecs;

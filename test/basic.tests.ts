@@ -895,7 +895,7 @@ describe('Write/Disconnect While Not Connected', () => {
         await expect(new Promise<void>((resolve, reject) => {
             const res = client.disconnect(error => error ? reject(error) : resolve());
             if (res !== undefined) {
-                reject(new Error(`disconenct did't return undefined but: ${res}`));
+                reject(new Error(`disconnect didn't return undefined but: ${res}`));
             }
         })).rejects.toMatchObject({ message: 'not connected' });
     }
