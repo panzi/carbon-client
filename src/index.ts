@@ -76,7 +76,7 @@ type Arg0<F extends Function> =
 export type IPTransport = 'UDP'|'TCP';
 export type Transport = IPTransport|'IPC';
 
-export type NetSocketFactory = (address: string, port: number) => NetSocket;
+export type NetSocketFactory = () => NetSocket;
 export type DgramSocketFactory = (type: 'udp4'|'udp6', sendBufferSize?: number) => DgramSocket;
 
 /**
@@ -673,7 +673,7 @@ export class CarbonClient {
             address = this.address;
             try {
                 this._socket = this.createNetSocket ?
-                    this.createNetSocket(address, this.port) :
+                    this.createNetSocket() :
                     new NetSocket({ writable: true, readable: false });
             } catch (error) {
                 return callback(error instanceof Error ? error : new Error(String(error)));
@@ -710,10 +710,13 @@ export class CarbonClient {
                 });
             } else {
                 address = this.address;
-                this._socket = createDgramSocket({
-                    type: this.family === 6 ? 'udp6' : 'udp4',
-                    sendBufferSize: this.udpSendBufferSize,
-                });
+                const type = this.family === 6 ? 'udp6' : 'udp4';
+                this._socket = this.createDgramSocket ?
+                    this.createDgramSocket(type, this.udpSendBufferSize) :
+                    createDgramSocket({
+                        type,
+                        sendBufferSize: this.udpSendBufferSize,
+                    });
                 this._socket.on('close', this._onCloseOk);
             }
         }
