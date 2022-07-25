@@ -516,7 +516,7 @@ export class CarbonClient {
                 if (this._socket) {
                     this._socket.off('connect', this._onConnect);
                     this._socket.off('error', this._onError);
-                    if (this.transport === 'TCP' || this.transport === 'IPC') {
+                    if (this._socket instanceof NetSocket) {
                         this._socket.off('close', this._onClose);
                         this._socket.off('end', this._onCloseOk);
                     } else {
@@ -553,7 +553,7 @@ export class CarbonClient {
      * @throws [[HostNotFound]] if the host referred to by [[CarbonClient.address]] cannot be resolved.
      * @throws [[Disconnected]] if [[CarbonClient.disconnect]] is called while connect is in progress.
      * @throws [[SocketGone]] if the socket goes away during the operation. (*should never happen*)
-     * @throws `TypeError` if the socket changes type (`DgramSocket` <-> `NetSocket`) during
+     * @throws `TypeError` if the socket changes type (`dgram.Socket` <-> `net.Socket`) during
      *         the operation. (*should never happen*)
      * @throws `Error` based on the errors that can be thrown by the underlying used NodeJS APIs.
      */
@@ -966,7 +966,7 @@ export class CarbonClient {
                     return promise;
                 } else {
                     // doesn't fit into buffer, send immediately
-                    if (this.transport === 'UDP') {
+                    if (this._socket instanceof DgramSocket) {
                         // if at all possible don't exceed sendBufferSize in one send using UDP
                         return this._send(buf).then(() => this._send(data));
                     }
