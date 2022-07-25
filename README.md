@@ -6,11 +6,30 @@ Carbon Client
 [Documentation](https://panzi.github.io/carbon-client)
 [GitHub](https://github.com/panzi/carbon-client/)
 
-Simple [Graphite](https://graphiteapp.org/) [Carbon](https://github.com/graphite-project/carbon)
+[Graphite](https://graphiteapp.org/) [Carbon](https://github.com/graphite-project/carbon)
 client for ingesting metrics in TypeScript for NodeJS.
 
 This supports TCP, UDP, and would even support Unix domain sockets, although
 those aren't supported by Carbon.
+
+Features
+--------
+
+* TCP, UDP, Unix domain sockets
+* IPv4 and IPv6
+* Carbon plain-text protocol
+* Validates keys, tag-names, and tag-values.
+* Batched writes.
+
+### Optional Features
+
+These features are controled via options.
+
+* Prefix all keys.
+* Buffering to a fixed size buffer and sending that buffer at a defined interval.
+* Auto-connect on writing metrics, so you don't need to call `connect()` and it
+  automatically re-connects if the connection is lost.
+* Retry sending on failure with a given retry count and delay.
 
 Examples
 --------
@@ -30,6 +49,7 @@ client.on('close', (hadError: boolean) => {
     console.log('carbon client closed connection, hadError:', hadError);
 });
 
+// Not needed if autoConnect is true.
 await client.connect();
 
 await client.write('foo.bar.key1', 123.456);
