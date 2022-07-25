@@ -512,26 +512,30 @@ export class CarbonClient {
         try {
             this._emit('close', hadError);
         } finally {
-            try {
-                if (this._socket) {
-                    this._socket.off('connect', this._onConnect);
-                    this._socket.off('error', this._onError);
-                    if (this._socket instanceof NetSocket) {
-                        this._socket.off('close', this._onClose);
-                        this._socket.off('end', this._onCloseOk);
-                    } else {
-                        this._socket.off('close', this._onCloseOk);
-                    }
-                }
-            } finally {
-                this._socket = null;
-            }
+            this._clearSocket();
         }
     };
 
     private _onCloseOk = () => {
         this._onClose(false);
     };
+
+    private _clearSocket(): void {
+        try {
+            if (this._socket) {
+                this._socket.off('connect', this._onConnect);
+                this._socket.off('error', this._onError);
+                if (this._socket instanceof NetSocket) {
+                    this._socket.off('close', this._onClose);
+                    this._socket.off('end', this._onCloseOk);
+                } else {
+                    this._socket.off('close', this._onCloseOk);
+                }
+            }
+        } finally {
+            this._socket = null;
+        }
+    }
 
     connect(): Promise<void>;
     connect(callback: (error?: Error) => void): void;
@@ -570,6 +574,37 @@ export class CarbonClient {
             return callback(error);
         }
 
+        const onError = (error: Error) => {
+            try {
+                const socket = this._socket;
+                if (socket) {
+                    socket.off('error', onError);
+                    this._clearSocket();
+                    if (socket instanceof NetSocket) {
+                        if (!socket.destroyed) {
+                            socket.destroy();
+                        }
+                    } else {
+                        try {
+                            socket.close();
+                        } catch (error) {
+                            if (!(error instanceof Error)) {
+                                setImmediate(() =>
+                                    this._emit(
+                                        'error',
+                                        new Error(String(error))));
+                            } else if ((error as NodeJS.ErrnoException).code !== 'ERR_SOCKET_DGRAM_NOT_RUNNING') {
+                                const error2 = error;
+                                setImmediate(() => this._emit('error', error2));
+                            }
+                        }
+                    }
+                }
+            } finally {
+                callback(error);
+            }
+        };
+
         let address: string;
         const doConnect = (): void => {
             try {
@@ -582,19 +617,19 @@ export class CarbonClient {
 
                 const onConnected = () => {
                     try {
-                        this._socket?.off('error', callback);
+                        this._socket?.off('error', onError);
                     } finally {
                         callback();
                     }
                 };
                 if (this.transport === 'IPC') {
                     if (this._socket instanceof DgramSocket) {
-                        return callback(new TypeError('socket changed type!?'));
+                        return onError(new TypeError('socket changed type!?'));
                     }
-                    this._socket.once('error', callback);
+                    this._socket.once('error', onError);
                     this._socket.connect(address, onConnected);
                 } else {
-                    this._socket.once('error', callback);
+                    this._socket.once('error', onError);
                     if (this.family !== undefined && this._socket instanceof NetSocket) {
                         this._socket.connect({
                             host: address,
@@ -606,7 +641,7 @@ export class CarbonClient {
                     }
                 }
             } catch (error) {
-                callback(error instanceof Error ? error : new Error(String(error)));
+                onError(error instanceof Error ? error : new Error(String(error)));
             }
         };
 
@@ -653,13 +688,46 @@ export class CarbonClient {
     }
 
     /**
-     * Returns true if the underlying socket was created and is writeable.
+     * Returns true if the underlying socket was created, is writeable and not connecting.
      */
     get isConnected(): boolean {
         if (this._socket instanceof NetSocket) {
-            return this._socket.writable;
+            return this._socket.writable && !this._socket.connecting && !this._socket.destroyed;
         }
+
         return this._socket !== null;
+    }
+
+    /**
+     * Returns true if the underlying socket was created and is connecting or if
+     * the client is in the process of retrying to connect.
+     */
+    get isConnecting(): boolean {
+        if (this._connectionCallbacks !== null) {
+            return true;
+        }
+
+        if (this._socket instanceof NetSocket) {
+            return this._socket.connecting;
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns true if the socket is destroyed, or if it is not yet created and
+     * not in the process of connecting.
+     */
+    get isDisconnected(): boolean {
+        if (this._connectionCallbacks !== null) {
+            return false;
+        }
+
+        if (this._socket instanceof NetSocket) {
+            return this._socket.destroyed;
+        }
+
+        return this._socket === null;
     }
 
     /**

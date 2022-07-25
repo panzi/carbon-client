@@ -522,10 +522,20 @@ describe('Only Connect', () => {
                     });
                     const isConnected = expectEvent(client, 'connect');
                     const whenClosed = waitEvent(client, 'close');
-                    await client.connect();
+                    const connectPromise = client.connect();
+                    expect(client.isConnecting).toBe(true);
+                    expect(client.isConnected).toBe(false);
+                    expect(client.isDisconnected).toBe(false);
+                    await connectPromise;
                     expect(isConnected()).toBe(true);
+                    expect(client.isConnecting).toBe(false);
+                    expect(client.isConnected).toBe(true);
+                    expect(client.isDisconnected).toBe(false);
                     (await promise).destroy();
                     await client.disconnect();
+                    expect(client.isConnecting).toBe(false);
+                    expect(client.isConnected).toBe(false);
+                    expect(client.isDisconnected).toBe(true);
                     await whenClosed;
                 } finally {
                     if (server.listening) {
@@ -543,9 +553,19 @@ describe('Only Connect', () => {
                 });
                 const isConnected = expectEvent(client, 'connect');
                 const whenClosed = waitEvent(client, 'close');
-                await client.connect();
+                const connectPromise = client.connect();
+                expect(client.isConnecting).toBe(true);
+                expect(client.isConnected).toBe(false);
+                expect(client.isDisconnected).toBe(false);
+                await connectPromise;
                 expect(isConnected()).toBe(true);
+                expect(client.isConnecting).toBe(false);
+                expect(client.isConnected).toBe(true);
+                expect(client.isDisconnected).toBe(false);
                 await client.disconnect();
+                expect(client.isConnecting).toBe(false);
+                expect(client.isConnected).toBe(false);
+                expect(client.isDisconnected).toBe(true);
                 await whenClosed;
             });
 
@@ -562,10 +582,20 @@ describe('Only Connect', () => {
                     });
                     const isConnected = expectEvent(client, 'connect');
                     const whenClosed = waitEvent(client, 'close');
-                    await client.connect();
+                    const connectPromise = client.connect();
+                    expect(client.isConnecting).toBe(true);
+                    expect(client.isConnected).toBe(false);
+                    expect(client.isDisconnected).toBe(false);
+                    await connectPromise;
                     expect(isConnected()).toBe(true);
+                    expect(client.isConnecting).toBe(false);
+                    expect(client.isConnected).toBe(true);
+                    expect(client.isDisconnected).toBe(false);
                     (await promise).destroy();
                     await client.disconnect();
+                    expect(client.isConnecting).toBe(false);
+                    expect(client.isConnected).toBe(false);
+                    expect(client.isDisconnected).toBe(true);
                     await whenClosed;
                 } finally {
                     if (server.listening) {
