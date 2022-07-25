@@ -561,64 +561,52 @@ export class CarbonClient {
         return this._connectWithRetry(0, callback);
     }
 
-    private _connect(): Promise<void>;
-    private _connect(callback: (error?: Error) => void): void;
-    private _connect(callback?: (error?: Error) => void): Promise<void>|void;
-
-    private _connect(callback?: (error?: Error) => void): Promise<void>|void {
+    private _connect(callback: (error?: Error) => void): void {
         if (this._socket) {
             if (this.autoConnect) {
-                if (callback) {
-                    return callback();
-                } else {
-                    return Promise.resolve();
-                }
+                return callback();
             }
             const error = new AlreadyConnected();
-            if (callback) {
-                return callback(error);
-            } else {
-                return Promise.reject(error);
-            }
+            return callback(error);
         }
 
         let address: string;
-        const executor = (resolve: () => void, reject: (error: Error) => void): void => {
+        const doConnect = (): void => {
             try {
                 if (!this._socket) {
-                    return reject(new SocketGone('socket gone before could connect'));
+                    return callback(new SocketGone('socket gone before could connect'));
                 }
 
                 this._socket.on('connect', this._onConnect);
                 this._socket.on('error', this._onError);
 
-                const callback = () => {
+                const onConnected = () => {
                     try {
-                        this._socket?.off('error', reject);
+                        this._socket?.off('error', callback);
                     } finally {
-                        resolve();
+                        callback();
                     }
                 };
                 if (this.transport === 'IPC') {
                     if (this._socket instanceof DgramSocket) {
-                        return reject(new TypeError('socket changed type!?'));
+                        return callback(new TypeError('socket changed type!?'));
                     }
-                    this._socket.once('error', reject);
-                    this._socket.connect(address, callback);
+                    this._socket.once('error', callback);
+                    this._socket.connect(address, onConnected);
                 } else {
-                    this._socket.once('error', reject);
+                    this._socket.once('error', callback);
                     if (this.family !== undefined && this._socket instanceof NetSocket) {
                         this._socket.connect({
                             host: address,
                             port: this.port,
                             family: this.family
-                        }, callback);
+                        }, onConnected);
                     } else {
-                        this._socket.connect(this.port, address, callback);
+                        this._socket.connect(this.port, address, onConnected);
                     }
                 }
             } catch (error) {
-                reject(error instanceof Error ? error : new Error(String(error)));
+                callback(error instanceof Error ? error : new Error(String(error)));
             }
         };
 
@@ -630,35 +618,27 @@ export class CarbonClient {
             this._socket.on('end', this._onCloseOk);
         } else {
             if (this.family === undefined) {
-                const dnsExecutor = (resolve: () => void, reject: (error: Error) => void): void => {
-                    dns.lookup(this.address, { all: true }, (error, addresses) => {
-                        if (error) {
-                            return reject(error);
-                        }
-                        const adr = addresses.find(adr => adr.family === 6) ?? addresses.find(adr => adr.family === 4);
-                        if (!adr) {
-                            return reject(new HostNotFound(this.address));
-                        }
-                        address = adr.address;
-                        try {
-                            this._socket = createDgramSocket({
-                                type: adr.family === 6 ? 'udp6' : 'udp4',
-                                sendBufferSize: this.udpSendBufferSize,
-                            });
-                            this._socket.on('close', this._onCloseOk);
-                        } catch (error) {
-                            return reject(error instanceof Error ? error : new Error(String(error)));
-                        }
+                return dns.lookup(this.address, { all: true }, (error, addresses) => {
+                    if (error) {
+                        return callback(error);
+                    }
+                    const adr = addresses.find(adr => adr.family === 6) ?? addresses.find(adr => adr.family === 4);
+                    if (!adr) {
+                        return callback(new HostNotFound(this.address));
+                    }
+                    address = adr.address;
+                    try {
+                        this._socket = createDgramSocket({
+                            type: adr.family === 6 ? 'udp6' : 'udp4',
+                            sendBufferSize: this.udpSendBufferSize,
+                        });
+                        this._socket.on('close', this._onCloseOk);
+                    } catch (error) {
+                        return callback(error instanceof Error ? error : new Error(String(error)));
+                    }
 
-                        executor(resolve, reject);
-                    });
-                };
-
-                if (callback) {
-                    return dnsExecutor(callback, callback);
-                } else {
-                    return new Promise(dnsExecutor);
-                }
+                    doConnect();
+                });
             } else {
                 address = this.address;
                 this._socket = createDgramSocket({
@@ -669,11 +649,7 @@ export class CarbonClient {
             }
         }
 
-        if (callback) {
-            executor(callback, callback);
-        } else {
-            return new Promise(executor);
-        }
+        doConnect();
     }
 
     /**
