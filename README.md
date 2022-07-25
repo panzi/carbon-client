@@ -30,6 +30,7 @@ These features are controled via options.
 * Auto-connect on writing metrics, so you don't need to call `connect()` and it
   automatically re-connects if the connection is lost.
 * Retry sending on failure with a given retry count and delay.
+* Custom socket factory. This can be used to implement TLS support.
 
 Examples
 --------

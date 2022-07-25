@@ -76,6 +76,9 @@ type Arg0<F extends Function> =
 export type IPTransport = 'UDP'|'TCP';
 export type Transport = IPTransport|'IPC';
 
+export type NetSocketFactory = (address: string, port: number) => NetSocket;
+export type DgramSocketFactory = (type: 'udp4'|'udp6', sendBufferSize?: number) => DgramSocket;
+
 /**
  * Default port used if none is explicitely specified.
  */
@@ -148,6 +151,17 @@ export interface CarbonClientOptions {
      * Transport layer protocol to use. Defaults to [[DEFAULT_TRANSPORT]].
      */
     transport?: Transport;
+
+    /**
+     * Socket factory to use.
+     * 
+     * This can be used to implement TLS support.
+     * 
+     * @see [[CarbonClient.createNetSocket]]
+     */
+    createNetSocket?: NetSocketFactory;
+
+    createDgramSocket?: DgramSocketFactory;
 
     /**
      * Size of send buffer. If set to `0` metrics are sent immediately.
@@ -314,6 +328,14 @@ export class CarbonClient {
     readonly transport: Transport;
 
     /**
+     * Socket factory.
+     * 
+     * This can be used to implement TLS support.
+     */
+    readonly createNetSocket: NetSocketFactory|null = null;
+    readonly createDgramSocket: DgramSocketFactory|null = null;
+
+    /**
      * If [[CarbonClient.transport]] is `"UDP"` the
      * [dgram.SocketOptions.sendBufferSize](https://nodejs.org/dist/latest-v16.x/docs/api/dgram.html#dgramcreatesocketoptions-callback)
      * of UDP sockets.
@@ -415,6 +437,8 @@ export class CarbonClient {
             this.port         = arg1.port ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
             this.transport    = transport;
             this.autoConnect  = arg1.autoConnect ?? false;
+            this.createNetSocket   = arg1.createNetSocket ?? null;
+            this.createDgramSocket = arg1.createDgramSocket ?? null;
 
             const { prefix, sendBufferSize, udpSendBufferSize, sendInterval, retryTimeout, retryOnError } = arg1;
 
@@ -612,7 +636,13 @@ export class CarbonClient {
 
         if (this.transport === 'TCP' || this.transport === 'IPC') {
             address = this.address;
-            this._socket = new NetSocket({ writable: true });
+            try {
+                this._socket = this.createNetSocket ?
+                    this.createNetSocket(address, this.port) :
+                    new NetSocket({ writable: true, readable: false });
+            } catch (error) {
+                return callback(error instanceof Error ? error : new Error(String(error)));
+            }
 
             this._socket.on('close', this._onClose);
             this._socket.on('end', this._onCloseOk);
@@ -628,14 +658,18 @@ export class CarbonClient {
                     }
                     address = adr.address;
                     try {
-                        this._socket = createDgramSocket({
-                            type: adr.family === 6 ? 'udp6' : 'udp4',
-                            sendBufferSize: this.udpSendBufferSize,
-                        });
-                        this._socket.on('close', this._onCloseOk);
+                        const type = adr.family === 6 ? 'udp6' : 'udp4';
+                        this._socket = this.createDgramSocket ?
+                            this.createDgramSocket(type, this.udpSendBufferSize) :
+                            createDgramSocket({
+                                type,
+                                sendBufferSize: this.udpSendBufferSize,
+                            });
                     } catch (error) {
                         return callback(error instanceof Error ? error : new Error(String(error)));
                     }
+
+                    this._socket.on('close', this._onCloseOk);
 
                     doConnect();
                 });
