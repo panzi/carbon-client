@@ -1,7 +1,7 @@
 Carbon Client
 =============
 
-[![Test Status](https://img.shields.io/github/workflow/status/panzi/carbon-client/Tests)](https://github.com/panzi/carbon-client/actions/workflows/test.yml)
+[![Test Status](https://img.shields.io/github/actions/workflow/status/panzi/carbon-client/test.yml?branch=main)](https://github.com/panzi/carbon-client/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/github/license/panzi/carbon-client)](https://github.com/panzi/carbon-client/blob/main/LICENSE)
 [Documentation](https://panzi.github.io/carbon-client)
 [GitHub](https://github.com/panzi/carbon-client/)
