@@ -4,6 +4,12 @@ on:
   push:
     branches:
     - main
+    tags-ignore:
+    - '**'
+    paths-ignore:
+    - 'test/**'
+    - 'jest.config.js'
+    - '.github/workflows/test.yml'
 
 jobs:
   tests:

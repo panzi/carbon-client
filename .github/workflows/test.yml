@@ -5,6 +5,13 @@ on:
     branches:
     - main
     - develop
+    tags-ignore:
+    - '**'
+    paths-ignore:
+    - '**/README.md'
+    - '**/LICENSE'
+    - '**/typedoc.json'
+    - '.github/workflows/docs.yml'
 
   pull_request:
     branches:
