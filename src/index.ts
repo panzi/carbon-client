@@ -1098,7 +1098,7 @@ export class CarbonClient {
                         } else if (this._connectionCallbacks !== null) {
                             this._connect(connectCallback);
                         }
-                    });
+                    }, this.retryTimeout);
                     return;
                 }
                 return this._connectDone(error, retryCount);
