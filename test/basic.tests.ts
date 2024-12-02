@@ -411,7 +411,7 @@ describe('Illegal Values', () => {
 
         try {
             await expect(client.write('a', -1, invalidDate)).rejects.toMatchObject({
-                message: `illegal date: Invalid Date`
+                message: `"a": illegal date: Invalid Date`
             });
 
             await expect(client.batchWrite([], invalidDate)).rejects.toMatchObject({
@@ -419,11 +419,11 @@ describe('Illegal Values', () => {
             });
 
             await expect(client.batchWrite([['a', -1, invalidDate]])).rejects.toMatchObject({
-                message: `illegal date: Invalid Date`
+                message: `"a": illegal date: Invalid Date`
             });
 
             await expect(client.batchWrite({ a: { value: -1, timestamp: invalidDate } })).rejects.toMatchObject({
-                message: `illegal date: Invalid Date`
+                message: `"a": illegal date: Invalid Date`
             });
         } finally {
             await client.disconnect();
