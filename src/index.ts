@@ -91,7 +91,7 @@ export const DEFAULT_TRANSPORT: Transport = 'TCP';
  * 
  * The size of this buffer (1428 bytes) is dimensioned so that the buffer as
  * well as the TCP and IP header fit into one Ethernet frame and can (hopefully)
- * be delivered without fragmentation. 
+ * be delivered without fragmentation.
  * 
  * @see <https://collectd.org/wiki/index.php/Plugin:Write_Graphite>
  */
@@ -1175,7 +1175,7 @@ export class CarbonClient {
 
                 const doSend = () => {
                     if (!this._socket) {
-                        return reject(new SocketGone('socket gone before could send data'));
+                        return reject(new SocketGone('socket gone before data could be sent'));
                     }
 
                     if (this._socket instanceof DgramSocket) {
@@ -1256,7 +1256,7 @@ export class CarbonClient {
             tags = arg4;
 
             if (isNaN(secs)) {
-                throw new IllegalArgument(`illegal date: ${arg3}`);
+                throw new IllegalArgument(`${JSON.stringify(path)}: illegal date: ${arg3}`);
             }
         } else {
             secs = Date.now() / 1000;
@@ -1326,7 +1326,7 @@ export class CarbonClient {
                     tags = arg4;
 
                     if (isNaN(secs)) {
-                        throw new IllegalArgument(`illegal date: ${arg3}`);
+                        throw new IllegalArgument(`${JSON.stringify(path)}: illegal date: ${arg3}`);
                     }
                 } else {
                     secs = defaultSecs;
@@ -1361,7 +1361,7 @@ export class CarbonClient {
                         secs = timestamp.getTime() / 1000;
 
                         if (isNaN(secs)) {
-                            throw new IllegalArgument(`illegal date: ${timestamp}`);
+                            throw new IllegalArgument(`${JSON.stringify(path)}: illegal date: ${timestamp}`);
                         }
                     } else {
                         secs = defaultSecs;
