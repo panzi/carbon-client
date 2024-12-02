@@ -10,7 +10,7 @@
     "build:doc": "typedoc src/index.ts"
   },
   "keywords": [
-    "graphite", "carbon", "metrics"
+    "graphite", "carbon", "carbon-cache", "metrics"
   ],
   "author": "Mathias Panzenböck",
   "license": "MIT",
