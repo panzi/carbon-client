@@ -1,6 +1,7 @@
 import { Socket as NetSocket } from 'net';
 import { Socket as DgramSocket, createSocket as createDgramSocket } from 'dgram';
 import * as dns from 'dns';
+import { TLSSocket, connect as createTlsSocket } from 'tls';
 
 export abstract class CarbonClientError extends Error {
     constructor(message: string) {
@@ -73,7 +74,7 @@ type Arg0<F extends Function> =
     F extends (arg0: infer T) => unknown ? T :
     F extends () => unknown ? void : never;
 
-export type IPTransport = 'UDP'|'TCP';
+export type IPTransport = 'UDP'|'TCP'|'TLS';
 export type Transport = IPTransport|'IPC';
 
 /**
@@ -106,6 +107,20 @@ export const DEFAULT_SEND_INTERVAL: number = 1000;
  * Default time in milliseconds to wait after retrying on error.
  */
 export const DEFAULT_RETRY_TIMEOUT: number = 1000;
+
+function readPemParam(pem: string|Buffer|string[]|Buffer[]|null|undefined): Buffer[]|null {
+    if (!pem) return null;
+
+    if (typeof pem === 'string') {
+        return [Buffer.from(pem, 'ascii')];
+    }
+
+    if (Buffer.isBuffer(pem)) {
+        return [pem];
+    }
+
+    return pem.map(item => typeof item === 'string' ? Buffer.from(item, 'ascii') : item);
+}
 
 /**
  * [[CarbonClient]] options.
@@ -148,6 +163,21 @@ export interface CarbonClientOptions {
      * Transport layer protocol to use. Defaults to [[DEFAULT_TRANSPORT]].
      */
     transport?: Transport;
+
+    /**
+     * PEM encoded TLS certificate if [[CarbonClientOptions.transport]] is 'TLS'.
+     */
+    tlsCert?: string|Buffer|string[]|Buffer[]|null;
+
+    /**
+     * PEM encoded TLS private key if [[CarbonClientOptions.transport]] is 'TLS'.
+     */
+    tlsKey?: string|Buffer|string[]|Buffer[]|null;
+
+    /**
+     * Override the trusted CA certificates.
+     */
+    tlsCA?: string|Buffer|string[]|Buffer[]|null;
 
     /**
      * Size of send buffer. If set to `0` metrics are sent immediately.
@@ -313,6 +343,22 @@ export class CarbonClient {
      */
     readonly transport: Transport;
 
+    private readonly _tlsCert: Buffer[]|null;
+    private readonly _tlsKey: Buffer[]|null;
+    private readonly _tlsCA: Buffer[]|null;
+
+    get tlsCert(): ReadonlyArray<Buffer>|null {
+        return this._tlsCert;
+    }
+
+    get tlsKey(): ReadonlyArray<Buffer>|null {
+        return this._tlsKey;
+    }
+
+    get tlsCA(): ReadonlyArray<Buffer>|null {
+        return this._tlsCA;
+    }
+
     /**
      * If [[CarbonClient.transport]] is `"UDP"` the
      * [dgram.SocketOptions.sendBufferSize](https://nodejs.org/dist/latest-v16.x/docs/api/dgram.html#dgramcreatesocketoptions-callback)
@@ -370,7 +416,7 @@ export class CarbonClient {
      */
     readonly retryTimeout: number = DEFAULT_RETRY_TIMEOUT;
 
-    private _socket: NetSocket|DgramSocket|null = null;
+    private _socket: NetSocket|DgramSocket|TLSSocket|null = null;
     private _callbacks: { [key in keyof EventMap]: Callbacks<EventMap[key]> } = {
         connect: { callbacks: [], emitActive: false, remove: [] },
         error:   { callbacks: [], emitActive: false, remove: [] },
@@ -415,6 +461,9 @@ export class CarbonClient {
             this.port         = arg1.port ?? (transport === 'IPC' ? -1 : DEFAULT_PORT);
             this.transport    = transport;
             this.autoConnect  = arg1.autoConnect ?? false;
+            this._tlsCert     = readPemParam(arg1.tlsCert);
+            this._tlsKey      = readPemParam(arg1.tlsKey);
+            this._tlsCA       = readPemParam(arg1.tlsCA);
 
             const { prefix, sendBufferSize, udpSendBufferSize, sendInterval, retryTimeout, retryOnError } = arg1;
 
@@ -466,6 +515,9 @@ export class CarbonClient {
         } else {
             this.address = arg1;
             this.retryOnError = 0;
+            this._tlsCert = null;
+            this._tlsKey  = null;
+            this._tlsCA   = null;
 
             if (arg2 === 'IPC') {
                 this.port      = -1;
@@ -605,6 +657,14 @@ export class CarbonClient {
             }
         };
 
+        const onConnected = () => {
+            try {
+                this._socket?.off('error', onError);
+            } finally {
+                callback();
+            }
+        };
+
         let address: string;
         const doConnect = (): void => {
             try {
@@ -615,13 +675,6 @@ export class CarbonClient {
                 this._socket.on('connect', this._onConnect);
                 this._socket.on('error', this._onError);
 
-                const onConnected = () => {
-                    try {
-                        this._socket?.off('error', onError);
-                    } finally {
-                        callback();
-                    }
-                };
                 if (this.transport === 'IPC') {
                     if (this._socket instanceof DgramSocket) {
                         return onError(new TypeError('socket changed type!?'));
@@ -651,6 +704,31 @@ export class CarbonClient {
 
             this._socket.on('close', this._onClose);
             this._socket.on('end', this._onCloseOk);
+
+            doConnect();
+        } else if (this.transport === 'TLS') {
+            address = this.address;
+
+            try {
+                const tlsSocket = this._socket = createTlsSocket({
+                    host: address,
+                    port: this.port,
+                    ca:   this._tlsCA   ?? undefined,
+                    cert: this._tlsCert ?? undefined,
+                    key:  this._tlsKey  ?? undefined,
+                });
+
+                tlsSocket.on('close', this._onClose);
+                tlsSocket.on('end', this._onCloseOk);
+
+                tlsSocket.on('secureConnect', this._onConnect);
+                tlsSocket.on('error', this._onError);
+
+                tlsSocket.once('error', onError);
+                tlsSocket.once('secureConnect', onConnected);
+            } catch (error) {
+                onError(error instanceof Error ? error : new Error(String(error)));
+            }
         } else {
             if (this.family === undefined) {
                 return dns.lookup(this.address, { all: true }, (error, addresses) => {
@@ -681,10 +759,9 @@ export class CarbonClient {
                     sendBufferSize: this.udpSendBufferSize,
                 });
                 this._socket.on('close', this._onCloseOk);
+                doConnect();
             }
         }
-
-        doConnect();
     }
 
     /**

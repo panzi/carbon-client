@@ -6,11 +6,115 @@ import { CarbonClient, EventMap, DEFAULT_PORT, DEFAULT_TRANSPORT, IPTransport, M
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import * as fs from 'fs/promises';
+import * as tls from 'tls';
 
 const DATE_TIME_0_STR = '2022-04-01T00:00:00+0200';
 const DATE_TIME_1_STR = '2022-04-01T01:00:00+0200';
 const DATE_TIME_2_STR = '2022-04-01T02:00:00+0200';
 const MOCK_DATE_TIME = new Date(DATE_TIME_0_STR);
+
+// openssl genrsa -out private-key.pem 1024
+// openssl req -new -key private-key.pem -out csr.pem
+// openssl x509 -req -in csr.pem -signkey private-key.pem -out public-cert.pem
+
+const CLIENT_CERT = `\
+-----BEGIN CERTIFICATE-----
+MIICDDCCAXUCFB6qpTmOkw3ZbCloDxLgFjh6l0FUMA0GCSqGSIb3DQEBCwUAMEUx
+CzAJBgNVBAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRl
+cm5ldCBXaWRnaXRzIFB0eSBMdGQwHhcNMjQxMjAzMDMzMDEzWhcNMjUwMTAyMDMz
+MDEzWjBFMQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEhMB8GA1UE
+CgwYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIGfMA0GCSqGSIb3DQEBAQUAA4GN
+ADCBiQKBgQCtgxHko0Uildu42WSQ/Rcd4ysgOcNqEjqCpzzTj9TFvEIN/FwoA28e
+ZQWF6j14XanHX8M1sxhYRqIXbH0lHL3B6I/reEWERRTbXSkt8vdQwO6ehr+i0bCg
+pAYMz+R8F8gFqn0DcZn8wIt3xQfDCVgbl1SD97JbukymKCeG7BvAmQIDAQABMA0G
+CSqGSIb3DQEBCwUAA4GBAHUGJuInhg9JYrokQfjSYMwD1xpkxzgm1s4G7qyIKpS6
+N2GgywMYRnKZ473sCnbKI0ECG0ZvEPa7gzteKeP8pnKC4N0hqZS8OPbDcaKx5Bc9
+kqQvLlRI675/2tmdyzwCYYrh4QgGPrkIqEgBWZTgnO4lXxZEpJLAdru80R4Dk0QN
+-----END CERTIFICATE-----
+`;
+
+const CLIENT_CSR = `\
+-----BEGIN CERTIFICATE REQUEST-----
+MIIBhDCB7gIBADBFMQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEh
+MB8GA1UECgwYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIGfMA0GCSqGSIb3DQEB
+AQUAA4GNADCBiQKBgQCtgxHko0Uildu42WSQ/Rcd4ysgOcNqEjqCpzzTj9TFvEIN
+/FwoA28eZQWF6j14XanHX8M1sxhYRqIXbH0lHL3B6I/reEWERRTbXSkt8vdQwO6e
+hr+i0bCgpAYMz+R8F8gFqn0DcZn8wIt3xQfDCVgbl1SD97JbukymKCeG7BvAmQID
+AQABoAAwDQYJKoZIhvcNAQELBQADgYEALU7NLk9sBG31S7Ax7dxz49Xpm3Q++HoL
+XszWw3NMTYGJpXFoVdqueF8GDusO3PqltKW+UZyhu2zx/dKqEfqRb97/04zFlMGg
+E+v2+D1XEgn8zmJZreFGtAHdxPWtJWNHk6OPAl+T2OSAS5GD5wh1FnhVyc1n3VRh
+IG4aJqeYVc8=
+-----END CERTIFICATE REQUEST-----
+`;
+
+const CLIENT_KEY = `\
+-----BEGIN PRIVATE KEY-----
+MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK2DEeSjRSKV27jZ
+ZJD9Fx3jKyA5w2oSOoKnPNOP1MW8Qg38XCgDbx5lBYXqPXhdqcdfwzWzGFhGohds
+fSUcvcHoj+t4RYRFFNtdKS3y91DA7p6Gv6LRsKCkBgzP5HwXyAWqfQNxmfzAi3fF
+B8MJWBuXVIP3slu6TKYoJ4bsG8CZAgMBAAECgYB+QYmbnVKJQBKKB2YuOnu/u7V9
+1YpkfK8msxqHt3lUCRDnrGJCm30X2NqT/0aLd1w7P2uEf7WPRpZcBQ1rG+bXJ/HT
+iUZI6KJNrysM9vzAiQD12FXmbtzJBlK3znEl+kgc2GO6mISr3AAE4JoZGK7xSKQ8
+0slvW1X7ZKb2M/zIAQJBANNibSaQWXTeSaW/xhIHkIWpnYH2yhz8huO3i1NN6Ng9
+qqijoYn2s5tgcGamUrRzTtopVzl7Be9CF9V5HnxcZuECQQDSIk8P56joddZhADWU
+AuhE4aIv98r7CA9tcbA/mZnB7ydtNeomK754NFfjhKUu1/LKicFMP0/BTovGaFkW
+ymi5AkEAkCqr2MZQTJWiUwoVM4y3M4H364B+XgCYmsw+mKUlLf3426Ul8iswWcMP
+ReMfuvR9jeruE0TlSkWgbbZ6ZUS74QJAaW/1o9Flm16lNv7X43CiAw4ER3VaUCN3
+Oj81ZHQ6BmltqwrGdmi0pbP99Zd1GtAYbzA34X5TEnfLAr8RFLJzYQJAEDpp0i+J
+IR9K56BJrezbmucguXccpK6dXy1af32cjdv6KzcS1hE0kE+qe8nab88rjIYA5n5m
+DTJhPRpIBbJp5Q==
+-----END PRIVATE KEY-----
+`;
+
+const SERVER_CERT = `\
+-----BEGIN CERTIFICATE-----
+MIICNDCCAZ0CFHHQHHOpNz3WmKX39dJQ9+e8SKnxMA0GCSqGSIb3DQEBCwUAMFkx
+CzAJBgNVBAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRl
+cm5ldCBXaWRnaXRzIFB0eSBMdGQxEjAQBgNVBAMMCWxvY2FsaG9zdDAeFw0yNDEy
+MDMwNDA2MDNaFw0yNTAxMDIwNDA2MDNaMFkxCzAJBgNVBAYTAkFVMRMwEQYDVQQI
+DApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBXaWRnaXRzIFB0eSBMdGQx
+EjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA
+rBGObWfAAcrp3y+4AglMXAefo1+5X2raLUIOgpv6DK09P7tSaDtOeCTUIURFo/3b
+cb4VaZxaizGErkG3jU8h4Jai+zfH7pbStoNfiUIOOqBzJ1e4WfsL74uaVPYBHmp+
+Myf1Hv0bS6LSUK03mFf+Jz8HGXuGcv9lFPLjhnSNutECAwEAATANBgkqhkiG9w0B
+AQsFAAOBgQBCCLLMzOmtwLC4TFxtqXfYKM6DtdmBDPeECuTpsTHw0MmGukDxjEmP
+ZcoUrXIFsVny973mtfm7RTGDpLoXc+/i/GJQO3a22lZ720buetbySo1HQDhKYltk
+5EAAjtvvajictMiIk/SzmTLWLFGl8HLSFbCg8EV+fw8u4Mfl1XL/dw==
+-----END CERTIFICATE-----
+`;
+
+const SERVER_CSR = `\
+-----BEGIN CERTIFICATE REQUEST-----
+MIIBmTCCAQICAQAwWTELMAkGA1UEBhMCQVUxEzARBgNVBAgMClNvbWUtU3RhdGUx
+ITAfBgNVBAoMGEludGVybmV0IFdpZGdpdHMgUHR5IEx0ZDESMBAGA1UEAwwJbG9j
+YWxob3N0MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCsEY5tZ8AByunfL7gC
+CUxcB5+jX7lfatotQg6Cm/oMrT0/u1JoO054JNQhREWj/dtxvhVpnFqLMYSuQbeN
+TyHglqL7N8fultK2g1+JQg46oHMnV7hZ+wvvi5pU9gEean4zJ/Ue/RtLotJQrTeY
+V/4nPwcZe4Zy/2UU8uOGdI260QIDAQABoAAwDQYJKoZIhvcNAQELBQADgYEAiGKk
+1fOMfyqMKi9MA/akArpKMcdkAnYXCO0sH20fiZDS3ivjJn2EQ/gv7+zkLLxOs6qq
+KjYGqSzStRNW4lbw0PF7QDa+m7fCs8cMbDp6JjSDFN/0cB9epclIjvbQtlkKAJl4
+y8pgfYDSWLQdgrQCO0LI+b6c7Ut3j+iYzL9rXJE=
+-----END CERTIFICATE REQUEST-----
+`;
+
+const SERVER_KEY = `\
+-----BEGIN PRIVATE KEY-----
+MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAKwRjm1nwAHK6d8v
+uAIJTFwHn6NfuV9q2i1CDoKb+gytPT+7Umg7Tngk1CFERaP923G+FWmcWosxhK5B
+t41PIeCWovs3x+6W0raDX4lCDjqgcydXuFn7C++LmlT2AR5qfjMn9R79G0ui0lCt
+N5hX/ic/Bxl7hnL/ZRTy44Z0jbrRAgMBAAECgYAUDmvSltBLpTJDgJVrL1hGNeFG
+ssaxt4u80MFOOg4YYi0Me7IsUhVgbbKIOiP/7HwisuxeBgqLxPbZNPHHN90T1oCF
+shotVCjA3WhiJLdNIf/Wincbsu7FOZiDGrYWyVdsAdlBPbxIfmDD6CYYw1XyBHSp
+X+yysCe4sPKZuRQQrQJBAORzfzs0H8biRnizyREgJZYQPshztGlhPlnF+rWnydrV
++MHnBcWX/qLi/86xP6IUCBezb2bASml1L4iejhDdG5sCQQDA0XnSJ7do0b1ZWW0c
+Z9ZUP5GEqBJy65mfjrDOVXWwuguBhr1TnLIEWYpHUUQendYEN3x8H5UJRcJ5EnHh
+zbgDAkEArib9zvwlXVARuOIVXWDMRmGL+vN5jPv8tCMgxGpsjs6fG/IpjEAadcHm
+kIK+p6fto2O+gO4Fy+7xlYyJcIGeEQJADcQm5WkugA5RbXqj/p4vQC6Vrhntz0Sg
+4DJozyJs16RAxAuhosGSOBtIcxULPwBX0k8/1QDQPCw92TUG6m8sjwJBAIK/d5iE
+n8vv69lbihEkcrOjEnAhxqAf8AD8qVZKZpeqr82QATRsyyZySRjP8jE2xISHW79a
+5T6xh5tyLl0bRuw=
+-----END PRIVATE KEY-----
+`;
 
 function sleep(milliseconds: number): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -604,6 +708,51 @@ describe('Only Connect', () => {
                     await unlinkIfExists(pipe);
                 }
             });
+
+            test('TLS', async () => {
+                const server = new tls.Server({
+                    cert: SERVER_CERT,
+                    key:  SERVER_KEY,
+                    ca:  [CLIENT_CERT],
+                    rejectUnauthorized: true,
+                    requestCert: true,
+                });
+                try {
+                    await listenTCP(server, port, 'localhost');
+                    const promise = connect(server);
+
+                    const client = new CarbonClient({
+                        address: 'localhost',
+                        port,
+                        transport: 'TLS',
+                        tlsCert: CLIENT_CERT,
+                        tlsKey:  CLIENT_KEY,
+                        tlsCA: [SERVER_CERT],
+                        sendBufferSize,
+                    });
+                    const isConnected = expectEvent(client, 'connect');
+                    const whenClosed = waitEvent(client, 'close');
+                    const connectPromise = client.connect();
+                    expect(client.isConnecting).toBe(true);
+                    expect(client.isConnected).toBe(false);
+                    expect(client.isDisconnected).toBe(false);
+                    await connectPromise;
+                    expect(isConnected()).toBe(true);
+                    expect(client.isConnecting).toBe(false);
+                    expect(client.isConnected).toBe(true);
+                    expect(client.isDisconnected).toBe(false);
+                    (await promise).destroy();
+                    await client.disconnect();
+                    expect(client.isConnecting).toBe(false);
+                    expect(client.isConnected).toBe(false);
+                    expect(client.isDisconnected).toBe(true);
+                    await whenClosed;
+                } finally {
+                    if (server.listening) {
+                        await close(server);
+                    }
+                }
+            });
         });
     }
 });
@@ -853,7 +1002,9 @@ describe('Write Metrics', () => {
                     await unlinkIfExists(pipe);
                 }
             });
-        })
+
+            test.todo('TLS');
+        });
     }
 
     for (const prefix of ['foo', 'foo.bar.']) {
@@ -953,6 +1104,8 @@ describe('Write/Disconnect While Not Connected', () => {
             const client = new CarbonClient(pipe, 'IPC');
             await testDisconnectWhileNotConnected(client);
         });
+
+        test.todo('TLS');
     });
 
     describe('Unbuffered', () => {
@@ -989,7 +1142,8 @@ describe('Write/Disconnect While Not Connected', () => {
             await testDisconnectWhileNotConnected(client);
         });
 
-    })
+        test.todo('TLS');
+    });
 });
 
 describe('Server Offline', () => {
@@ -1034,6 +1188,8 @@ describe('Server Offline', () => {
                     await unlinkIfExists(pipe);
                 }
             });
+
+            test.todo('TLS');
         });
     }
 });
@@ -1123,6 +1279,8 @@ describe('Retry On Error', () => {
                 });
                 await doTest(client, server => listenIPC(server, pipe), 'ENOENT');
             });
+
+            test.todo('TLS');
         });
     }
 });
@@ -1223,6 +1381,8 @@ describe('Server Disconnect', () => {
                     return server;
                 });
             });
+
+            test.todo('TLS');
         });
     }
 });
@@ -1383,6 +1543,8 @@ describe('Auto-Connect', () => {
                     return server;
                 });
             });
+
+            test.todo('TLS');
         });
     }
 });
