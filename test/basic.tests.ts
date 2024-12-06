@@ -3,118 +3,37 @@ import { Socket as NetSocket, Server } from 'net';
 import { Socket as DgramSocket, createSocket as createDgramSocket } from 'dgram';
 import MockDate from 'mockdate';
 import { CarbonClient, EventMap, DEFAULT_PORT, DEFAULT_TRANSPORT, IPTransport, MetricMap, MetricParams, MetricTuple } from '../src';
-import { resolve } from 'path';
+import { resolve, parse as parsePath } from 'path';
 import { tmpdir } from 'os';
 import * as fs from 'fs/promises';
 import * as tls from 'tls';
+import { readFileSync } from 'fs';
 
 const DATE_TIME_0_STR = '2022-04-01T00:00:00+0200';
 const DATE_TIME_1_STR = '2022-04-01T01:00:00+0200';
 const DATE_TIME_2_STR = '2022-04-01T02:00:00+0200';
 const MOCK_DATE_TIME = new Date(DATE_TIME_0_STR);
 
-// openssl genrsa -out private-key.pem 1024
-// openssl req -new -key private-key.pem -out csr.pem
-// openssl x509 -req -in csr.pem -signkey private-key.pem -out public-cert.pem
+const CA_PASSWORD = 'password1234';
 
-const CLIENT_CERT = `\
------BEGIN CERTIFICATE-----
-MIICDDCCAXUCFB6qpTmOkw3ZbCloDxLgFjh6l0FUMA0GCSqGSIb3DQEBCwUAMEUx
-CzAJBgNVBAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRl
-cm5ldCBXaWRnaXRzIFB0eSBMdGQwHhcNMjQxMjAzMDMzMDEzWhcNMjUwMTAyMDMz
-MDEzWjBFMQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEhMB8GA1UE
-CgwYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIGfMA0GCSqGSIb3DQEBAQUAA4GN
-ADCBiQKBgQCtgxHko0Uildu42WSQ/Rcd4ysgOcNqEjqCpzzTj9TFvEIN/FwoA28e
-ZQWF6j14XanHX8M1sxhYRqIXbH0lHL3B6I/reEWERRTbXSkt8vdQwO6ehr+i0bCg
-pAYMz+R8F8gFqn0DcZn8wIt3xQfDCVgbl1SD97JbukymKCeG7BvAmQIDAQABMA0G
-CSqGSIb3DQEBCwUAA4GBAHUGJuInhg9JYrokQfjSYMwD1xpkxzgm1s4G7qyIKpS6
-N2GgywMYRnKZ473sCnbKI0ECG0ZvEPa7gzteKeP8pnKC4N0hqZS8OPbDcaKx5Bc9
-kqQvLlRI675/2tmdyzwCYYrh4QgGPrkIqEgBWZTgnO4lXxZEpJLAdru80R4Dk0QN
------END CERTIFICATE-----
-`;
+const testDir = (() => {
+    let dir = resolve(__dirname, '..');
+    const dirPath = parsePath(dir);
+    if (dirPath.base === 'build') {
+        return resolve(dirPath.dir, 'test');
+    }
+    return __dirname;
+})();
 
-const CLIENT_CSR = `\
------BEGIN CERTIFICATE REQUEST-----
-MIIBhDCB7gIBADBFMQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEh
-MB8GA1UECgwYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIGfMA0GCSqGSIb3DQEB
-AQUAA4GNADCBiQKBgQCtgxHko0Uildu42WSQ/Rcd4ysgOcNqEjqCpzzTj9TFvEIN
-/FwoA28eZQWF6j14XanHX8M1sxhYRqIXbH0lHL3B6I/reEWERRTbXSkt8vdQwO6e
-hr+i0bCgpAYMz+R8F8gFqn0DcZn8wIt3xQfDCVgbl1SD97JbukymKCeG7BvAmQID
-AQABoAAwDQYJKoZIhvcNAQELBQADgYEALU7NLk9sBG31S7Ax7dxz49Xpm3Q++HoL
-XszWw3NMTYGJpXFoVdqueF8GDusO3PqltKW+UZyhu2zx/dKqEfqRb97/04zFlMGg
-E+v2+D1XEgn8zmJZreFGtAHdxPWtJWNHk6OPAl+T2OSAS5GD5wh1FnhVyc1n3VRh
-IG4aJqeYVc8=
------END CERTIFICATE REQUEST-----
-`;
+// See: https://gist.github.com/pcan/e384fcad2a83e3ce20f9a4c33f4a13ae
+const CA_KEY = readFileSync(resolve(testDir, 'ca-key.pem'));
+const CA_CRT = readFileSync(resolve(testDir, 'ca-crt.pem'));
 
-const CLIENT_KEY = `\
------BEGIN PRIVATE KEY-----
-MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK2DEeSjRSKV27jZ
-ZJD9Fx3jKyA5w2oSOoKnPNOP1MW8Qg38XCgDbx5lBYXqPXhdqcdfwzWzGFhGohds
-fSUcvcHoj+t4RYRFFNtdKS3y91DA7p6Gv6LRsKCkBgzP5HwXyAWqfQNxmfzAi3fF
-B8MJWBuXVIP3slu6TKYoJ4bsG8CZAgMBAAECgYB+QYmbnVKJQBKKB2YuOnu/u7V9
-1YpkfK8msxqHt3lUCRDnrGJCm30X2NqT/0aLd1w7P2uEf7WPRpZcBQ1rG+bXJ/HT
-iUZI6KJNrysM9vzAiQD12FXmbtzJBlK3znEl+kgc2GO6mISr3AAE4JoZGK7xSKQ8
-0slvW1X7ZKb2M/zIAQJBANNibSaQWXTeSaW/xhIHkIWpnYH2yhz8huO3i1NN6Ng9
-qqijoYn2s5tgcGamUrRzTtopVzl7Be9CF9V5HnxcZuECQQDSIk8P56joddZhADWU
-AuhE4aIv98r7CA9tcbA/mZnB7ydtNeomK754NFfjhKUu1/LKicFMP0/BTovGaFkW
-ymi5AkEAkCqr2MZQTJWiUwoVM4y3M4H364B+XgCYmsw+mKUlLf3426Ul8iswWcMP
-ReMfuvR9jeruE0TlSkWgbbZ6ZUS74QJAaW/1o9Flm16lNv7X43CiAw4ER3VaUCN3
-Oj81ZHQ6BmltqwrGdmi0pbP99Zd1GtAYbzA34X5TEnfLAr8RFLJzYQJAEDpp0i+J
-IR9K56BJrezbmucguXccpK6dXy1af32cjdv6KzcS1hE0kE+qe8nab88rjIYA5n5m
-DTJhPRpIBbJp5Q==
------END PRIVATE KEY-----
-`;
+const SERVER_KEY = readFileSync(resolve(testDir, 'server-key.pem'));
+const SERVER_CRT = readFileSync(resolve(testDir, 'server-crt.pem'));
 
-const SERVER_CERT = `\
------BEGIN CERTIFICATE-----
-MIICNDCCAZ0CFHHQHHOpNz3WmKX39dJQ9+e8SKnxMA0GCSqGSIb3DQEBCwUAMFkx
-CzAJBgNVBAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRl
-cm5ldCBXaWRnaXRzIFB0eSBMdGQxEjAQBgNVBAMMCWxvY2FsaG9zdDAeFw0yNDEy
-MDMwNDA2MDNaFw0yNTAxMDIwNDA2MDNaMFkxCzAJBgNVBAYTAkFVMRMwEQYDVQQI
-DApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBXaWRnaXRzIFB0eSBMdGQx
-EjAQBgNVBAMMCWxvY2FsaG9zdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA
-rBGObWfAAcrp3y+4AglMXAefo1+5X2raLUIOgpv6DK09P7tSaDtOeCTUIURFo/3b
-cb4VaZxaizGErkG3jU8h4Jai+zfH7pbStoNfiUIOOqBzJ1e4WfsL74uaVPYBHmp+
-Myf1Hv0bS6LSUK03mFf+Jz8HGXuGcv9lFPLjhnSNutECAwEAATANBgkqhkiG9w0B
-AQsFAAOBgQBCCLLMzOmtwLC4TFxtqXfYKM6DtdmBDPeECuTpsTHw0MmGukDxjEmP
-ZcoUrXIFsVny973mtfm7RTGDpLoXc+/i/GJQO3a22lZ720buetbySo1HQDhKYltk
-5EAAjtvvajictMiIk/SzmTLWLFGl8HLSFbCg8EV+fw8u4Mfl1XL/dw==
------END CERTIFICATE-----
-`;
-
-const SERVER_CSR = `\
------BEGIN CERTIFICATE REQUEST-----
-MIIBmTCCAQICAQAwWTELMAkGA1UEBhMCQVUxEzARBgNVBAgMClNvbWUtU3RhdGUx
-ITAfBgNVBAoMGEludGVybmV0IFdpZGdpdHMgUHR5IEx0ZDESMBAGA1UEAwwJbG9j
-YWxob3N0MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCsEY5tZ8AByunfL7gC
-CUxcB5+jX7lfatotQg6Cm/oMrT0/u1JoO054JNQhREWj/dtxvhVpnFqLMYSuQbeN
-TyHglqL7N8fultK2g1+JQg46oHMnV7hZ+wvvi5pU9gEean4zJ/Ue/RtLotJQrTeY
-V/4nPwcZe4Zy/2UU8uOGdI260QIDAQABoAAwDQYJKoZIhvcNAQELBQADgYEAiGKk
-1fOMfyqMKi9MA/akArpKMcdkAnYXCO0sH20fiZDS3ivjJn2EQ/gv7+zkLLxOs6qq
-KjYGqSzStRNW4lbw0PF7QDa+m7fCs8cMbDp6JjSDFN/0cB9epclIjvbQtlkKAJl4
-y8pgfYDSWLQdgrQCO0LI+b6c7Ut3j+iYzL9rXJE=
------END CERTIFICATE REQUEST-----
-`;
-
-const SERVER_KEY = `\
------BEGIN PRIVATE KEY-----
-MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAKwRjm1nwAHK6d8v
-uAIJTFwHn6NfuV9q2i1CDoKb+gytPT+7Umg7Tngk1CFERaP923G+FWmcWosxhK5B
-t41PIeCWovs3x+6W0raDX4lCDjqgcydXuFn7C++LmlT2AR5qfjMn9R79G0ui0lCt
-N5hX/ic/Bxl7hnL/ZRTy44Z0jbrRAgMBAAECgYAUDmvSltBLpTJDgJVrL1hGNeFG
-ssaxt4u80MFOOg4YYi0Me7IsUhVgbbKIOiP/7HwisuxeBgqLxPbZNPHHN90T1oCF
-shotVCjA3WhiJLdNIf/Wincbsu7FOZiDGrYWyVdsAdlBPbxIfmDD6CYYw1XyBHSp
-X+yysCe4sPKZuRQQrQJBAORzfzs0H8biRnizyREgJZYQPshztGlhPlnF+rWnydrV
-+MHnBcWX/qLi/86xP6IUCBezb2bASml1L4iejhDdG5sCQQDA0XnSJ7do0b1ZWW0c
-Z9ZUP5GEqBJy65mfjrDOVXWwuguBhr1TnLIEWYpHUUQendYEN3x8H5UJRcJ5EnHh
-zbgDAkEArib9zvwlXVARuOIVXWDMRmGL+vN5jPv8tCMgxGpsjs6fG/IpjEAadcHm
-kIK+p6fto2O+gO4Fy+7xlYyJcIGeEQJADcQm5WkugA5RbXqj/p4vQC6Vrhntz0Sg
-4DJozyJs16RAxAuhosGSOBtIcxULPwBX0k8/1QDQPCw92TUG6m8sjwJBAIK/d5iE
-n8vv69lbihEkcrOjEnAhxqAf8AD8qVZKZpeqr82QATRsyyZySRjP8jE2xISHW79a
-5T6xh5tyLl0bRuw=
------END PRIVATE KEY-----
-`;
+const CLIENT_KEY = readFileSync(resolve(testDir, 'client-key.pem'));
+const CLIENT_CRT = readFileSync(resolve(testDir, 'client-crt.pem'));
 
 function sleep(milliseconds: number): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -126,11 +45,11 @@ function receive(server: Server): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
         server.once('error', reject);
 
-        server.once('connection', socket => {
+        server.once(server instanceof tls.Server ? 'secureConnection' : 'connection', socket => {
             const buf: Buffer[] = [];
             let finished = false;
 
-            socket.on('data', data => {
+            socket.on('data', (data: Buffer) => {
                 buf.push(data);
             });
 
@@ -284,12 +203,17 @@ afterAll(() => {
     MockDate.reset();
 });
 
+let _nextPort = 3004;
+function getPort(): number {
+    return _nextPort ++;
+}
+
 describe('Initialize Client', () => {
     const host = 'localhost';
-    const port = 3004;
 
     test('Defaults', () => {
         for (const autoConnect of [true, false]) {
+            const port = getPort();
             let client = autoConnect ?
                 new CarbonClient(host, port, undefined, autoConnect) :
                 new CarbonClient(host);
@@ -321,6 +245,7 @@ describe('Initialize Client', () => {
     for (const transport of ['TCP', 'UDP'] as IPTransport[]) {
         test(transport, () => {
             for (const autoConnect of [true, false]) {
+                const port = getPort();
                 let client = new CarbonClient(host, port, transport, autoConnect);
 
                 expect(client.address).toBe(host);
@@ -606,7 +531,6 @@ describe('Illegal Values', () => {
 describe('Only Connect', () => {
     for (const buffered of [true, false]) {
         describe(buffered ? 'Buffered' : 'Unbuffered', () => {
-            const port = 2222;
             const pipe = resolve(tmpdir(), buffered ?
                 `carbon-client.test.${process.pid}.connect.pipe` :
                 `carbon-client.test.${process.pid}.connect-unbuffered.pipe`);
@@ -615,6 +539,7 @@ describe('Only Connect', () => {
             test('TCP', async () => {
                 const server = new Server();
                 try {
+                    const port = getPort();
                     await listenTCP(server, port, 'localhost');
                     const promise = connect(server);
 
@@ -649,6 +574,7 @@ describe('Only Connect', () => {
             });
 
             test('UDP', async () => {
+                const port = getPort();
                 const client = new CarbonClient({
                     address: 'localhost',
                     port,
@@ -711,13 +637,14 @@ describe('Only Connect', () => {
 
             test('TLS', async () => {
                 const server = new tls.Server({
-                    cert: SERVER_CERT,
+                    cert: SERVER_CRT,
                     key:  SERVER_KEY,
-                    ca:  [CLIENT_CERT],
+                    ca:   CA_CRT,
                     rejectUnauthorized: true,
                     requestCert: true,
                 });
                 try {
+                    const port = getPort();
                     await listenTCP(server, port, 'localhost');
                     const promise = connect(server);
 
@@ -725,9 +652,9 @@ describe('Only Connect', () => {
                         address: 'localhost',
                         port,
                         transport: 'TLS',
-                        tlsCert: CLIENT_CERT,
+                        tlsCert: CLIENT_CRT,
                         tlsKey:  CLIENT_KEY,
-                        tlsCA: [SERVER_CERT],
+                        tlsCA:   CA_CRT,
                         sendBufferSize,
                     });
                     const isConnected = expectEvent(client, 'connect');
@@ -937,13 +864,13 @@ describe('Write Metrics', () => {
 
     for (const testGroup of testGroups) {
         describe(testGroup.name, () => {
-            const port = 2222;
             const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.write-${testGroup.suffix}.pipe`);
             const sendBufferSize = testGroup.buffered ? undefined : 0;
 
             test('TCP', async () => {
                 const server = new Server();
                 try {
+                    const port = getPort();
                     await listenTCP(server, port, 'localhost');
                     const client = new CarbonClient({
                         address: 'localhost',
@@ -965,6 +892,7 @@ describe('Write Metrics', () => {
             test('UDP', async () => {
                 const server = createDgramSocket('udp4');
                 try {
+                    const port = getPort();
                     await bind(server, port, 'localhost')
                     const client = new CarbonClient({
                         address: 'localhost',
@@ -1003,15 +931,44 @@ describe('Write Metrics', () => {
                 }
             });
 
-            test.todo('TLS');
+            test('TLS', async () => {
+                const server = new tls.Server({
+                    cert: SERVER_CRT,
+                    key:  SERVER_KEY,
+                    ca:   CA_CRT,
+                    rejectUnauthorized: true,
+                    requestCert: true,
+                });
+                try {
+                    const port = getPort();
+                    await listenTCP(server, port, 'localhost');
+                    const client = new CarbonClient({
+                        address: 'localhost',
+                        port,
+                        transport: 'TLS',
+                        tlsCert: CLIENT_CRT,
+                        tlsKey:  CLIENT_KEY,
+                        tlsCA:   CA_CRT,
+                        sendBufferSize,
+                        sendInterval: testGroup.sendInterval,
+                    });
+                    expect(client.isBuffered).toBe(testGroup.buffered);
+
+                    await testGroup.testFunc(client, () => receive(server));
+                } finally {
+                    if (server.listening) {
+                        await close(server);
+                    }
+                }
+            });
         });
     }
 
     for (const prefix of ['foo', 'foo.bar.']) {
         test(`With Prefix ${prefix}`, async () => {
             const server = new Server();
-            const port = 2222;
             try {
+                const port = getPort();
                 await listenTCP(server, port, 'localhost');
                 const client = new CarbonClient({
                     address: 'localhost',
@@ -1082,15 +1039,16 @@ describe('Write/Disconnect While Not Connected', () => {
     }
 
     describe('Buffered', () => {
-        const port = 2222;
         const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.not-connected.pipe`);
 
         test('TCP', async () => {
+            const port = getPort();
             const client = new CarbonClient('localhost', port, 'TCP');
             await testDisconnectWhileNotConnected(client);
         });
 
         test('UDP', async () => {
+            const port = getPort();
             const client = new CarbonClient({
                 address: 'localhost',
                 port,
@@ -1105,14 +1063,25 @@ describe('Write/Disconnect While Not Connected', () => {
             await testDisconnectWhileNotConnected(client);
         });
 
-        test.todo('TLS');
+        test('TLS', async () => {
+            const port = getPort();
+            const client = new CarbonClient({
+                address: 'localhost',
+                port,
+                transport: 'TLS',
+                tlsCert: CLIENT_CRT,
+                tlsKey:  CLIENT_KEY,
+                tlsCA:   CA_CRT,
+            });
+            await testDisconnectWhileNotConnected(client);
+        });
     });
 
     describe('Unbuffered', () => {
-        const port = 2222;
         const pipe = resolve(tmpdir(), `carbon-client.test.${process.pid}.not-connected-unbuffered.pipe`);
     
         test('TCP', async () => {
+            const port = getPort();
             const client = new CarbonClient({
                 address: 'localhost',
                 port,
@@ -1123,6 +1092,7 @@ describe('Write/Disconnect While Not Connected', () => {
         });
     
         test('UDP', async () => {
+            const port = getPort();
             const client = new CarbonClient({
                 address: 'localhost',
                 port,
@@ -1142,20 +1112,32 @@ describe('Write/Disconnect While Not Connected', () => {
             await testDisconnectWhileNotConnected(client);
         });
 
-        test.todo('TLS');
+        test('TLS', async () => {
+            const port = getPort();
+            const client = new CarbonClient({
+                address: 'localhost',
+                port,
+                transport: 'TLS',
+                tlsCert: CLIENT_CRT,
+                tlsKey:  CLIENT_KEY,
+                tlsCA:   CA_CRT,
+                sendBufferSize: 0,
+            });
+            await testDisconnectWhileNotConnected(client);
+        });
     });
 });
 
 describe('Server Offline', () => {
     for (const buffered of [true, false]) {
         describe(buffered ? 'Buffered' : 'Unbuffered', () => {
-            const port = 2222;
             const pipe = resolve(tmpdir(), buffered ?
                 `carbon-client.test.${process.pid}.no-server.pipe` :
                 `carbon-client.test.${process.pid}.no-server-unbuffered.pipe`);
             const sendBufferSize = buffered ? undefined : 0;
 
             test('TCP', async () => {
+                const port = getPort();
                 const client = new CarbonClient({
                     address: 'localhost',
                     port,
@@ -1189,7 +1171,21 @@ describe('Server Offline', () => {
                 }
             });
 
-            test.todo('TLS');
+            test('TLS', async () => {
+                const port = getPort();
+                const client = new CarbonClient({
+                    address: 'localhost',
+                    port,
+                    transport: 'TLS',
+                    tlsCert: CLIENT_CRT,
+                    tlsKey:  CLIENT_KEY,
+                    tlsCA:   CA_CRT,
+                    sendBufferSize,
+                });
+                await expect(client.connect()).rejects.toMatchObject({
+                    code: 'ECONNREFUSED'
+                });
+            });
         });
     }
 });
@@ -1202,13 +1198,12 @@ describe('Retry On Error', () => {
 
     for (const buffered of [true, false]) {
         describe(buffered ? 'Buffered' : 'Unbuffered', () => {
-            const port = 2222;
             const pipe = resolve(tmpdir(), buffered ?
                 `carbon-client.test.${process.pid}.no-server.pipe` :
                 `carbon-client.test.${process.pid}.no-server-unbuffered.pipe`);
             const sendBufferSize = buffered ? undefined : 0;
 
-            async function doTest(client: CarbonClient, listen: (server: Server) => Promise<void>, errorCode: string): Promise<void> {
+            async function doTest(client: CarbonClient, transport: 'TCP'|'TLS', listen: (server: Server) => Promise<void>, errorCode: string): Promise<void> {
                 let errors: Error[] = [];
                 client.on('error', error => {
                     errors.push(error);
@@ -1217,7 +1212,13 @@ describe('Retry On Error', () => {
 
                 await sleep(25);
 
-                const server = new Server();
+                const server = transport === 'TLS' ? new tls.Server({
+                    cert: SERVER_CRT,
+                    key:  SERVER_KEY,
+                    ca:   CA_CRT,
+                    rejectUnauthorized: true,
+                    requestCert: true,
+                }) : new Server();
                 try {
                     await listen(server);
                     const promise = receive(server);
@@ -1254,6 +1255,7 @@ describe('Retry On Error', () => {
             }
 
             test('TCP', async () => {
+                const port = getPort();
                 const client = new CarbonClient({
                     address: 'localhost',
                     port,
@@ -1264,7 +1266,7 @@ describe('Retry On Error', () => {
                     retryTimeout: 15,
                     autoConnect: true,
                 });
-                await doTest(client, server => listenTCP(server, port, 'localhost'), 'ECONNREFUSED');
+                await doTest(client, 'TCP', server => listenTCP(server, port, 'localhost'), 'ECONNREFUSED');
             });
 
             test('IPC', async () => {
@@ -1277,10 +1279,26 @@ describe('Retry On Error', () => {
                     retryTimeout: 15,
                     autoConnect: true,
                 });
-                await doTest(client, server => listenIPC(server, pipe), 'ENOENT');
+                await doTest(client, 'TCP', server => listenIPC(server, pipe), 'ENOENT');
             });
 
-            test.todo('TLS');
+            test('TLS', async () => {
+                const port = getPort();
+                const client = new CarbonClient({
+                    address: 'localhost',
+                    port,
+                    transport: 'TLS',
+                    tlsCert: CLIENT_CRT,
+                    tlsKey:  CLIENT_KEY,
+                    tlsCA:   CA_CRT,
+                    sendBufferSize,
+                    sendInterval: 2,
+                    retryOnError: 15,
+                    retryTimeout: 15,
+                    autoConnect: true,
+                });
+                await doTest(client, 'TLS', server => listenTCP(server, port, 'localhost'), 'ECONNREFUSED');
+            });
         });
     }
 });
@@ -1288,7 +1306,6 @@ describe('Retry On Error', () => {
 describe('Server Disconnect', () => {
     for (const buffered of [true, false]) {
         describe(buffered ? 'Buffered' : 'Unbuffered', () => {
-            const port = 2222;
             const pipe = resolve(tmpdir(), buffered ?
                 `carbon-client.test.${process.pid}.server-disconnect.pipe` :
                 `carbon-client.test.${process.pid}.server-disconnect-unbuffered.pipe`);
@@ -1354,6 +1371,7 @@ describe('Server Disconnect', () => {
             }
 
             test('TCP', async () => {
+                const port = getPort();
                 const client = new CarbonClient({
                     address: 'localhost',
                     port,
@@ -1382,7 +1400,30 @@ describe('Server Disconnect', () => {
                 });
             });
 
-            test.todo('TLS');
+            test('TLS', async () => {
+                const port = getPort();
+                const client = new CarbonClient({
+                    address: 'localhost',
+                    port,
+                    transport: 'TLS',
+                    tlsCert: CLIENT_CRT,
+                    tlsKey:  CLIENT_KEY,
+                    tlsCA:   CA_CRT,
+                    sendBufferSize,
+                });
+
+                await doTests(client, async () => {
+                    const server = new tls.Server({
+                        cert: SERVER_CRT,
+                        key:  SERVER_KEY,
+                        ca:   CA_CRT,
+                        rejectUnauthorized: true,
+                        requestCert: true,
+                    });
+                    await listenTCP(server, port, 'localhost');
+                    return server;
+                });
+            });
         });
     }
 });
@@ -1390,7 +1431,6 @@ describe('Server Disconnect', () => {
 describe('Auto-Connect', () => {
     for (const buffered of [true, false]) {
         describe(buffered ? 'Buffered' : 'Unbuffered', () => {
-            const port = 2222;
             const pipe = resolve(tmpdir(), buffered ?
                 `carbon-client.test.${process.pid}.auto-connect.pipe` :
                 `carbon-client.test.${process.pid}.auto-connect-unbuffered.pipe`);
@@ -1441,6 +1481,7 @@ describe('Auto-Connect', () => {
             }
 
             test('TCP', async () => {
+                const port = getPort();
                 {
                     const client = new CarbonClient({
                         address: 'localhost',
@@ -1476,6 +1517,7 @@ describe('Auto-Connect', () => {
             });
 
             test('UDP', async () => {
+                const port = getPort();
                 {
                     const client = new CarbonClient({
                         address: 'localhost',
@@ -1544,7 +1586,60 @@ describe('Auto-Connect', () => {
                 });
             });
 
-            test.todo('TLS');
+
+            test('TLS', async () => {
+                const port = getPort();
+                {
+                    const client = new CarbonClient({
+                        address: 'localhost',
+                        port,
+                        transport: 'TLS',
+                        tlsCert: CLIENT_CRT,
+                        tlsKey:  CLIENT_KEY,
+                        tlsCA:   CA_CRT,
+                        autoConnect: true,
+                        sendBufferSize,
+                    });
+                    const server = new tls.Server({
+                        cert: SERVER_CRT,
+                        key:  SERVER_KEY,
+                        ca:   CA_CRT,
+                        rejectUnauthorized: true,
+                        requestCert: true,
+                    });
+                    try {
+                        await listenTCP(server, port, 'localhost');
+
+                        await doTests(client, () => receive(server));
+                    } finally {
+                        if (server.listening) {
+                            await close(server);
+                        }
+                    }
+                }
+
+                const client = new CarbonClient({
+                    address: 'localhost',
+                    port,
+                    transport: 'TLS',
+                    tlsCert: CLIENT_CRT,
+                    tlsKey:  CLIENT_KEY,
+                    tlsCA:   CA_CRT,
+                    autoConnect: true,
+                    sendBufferSize,
+                });
+                await doReconnectTests(client, async () => {
+                    const server = new tls.Server({
+                        cert: SERVER_CRT,
+                        key:  SERVER_KEY,
+                        ca:   CA_CRT,
+                        rejectUnauthorized: true,
+                        requestCert: true,
+                    });
+                    await listenTCP(server, port, 'localhost');
+                    return server;
+                });
+            });
         });
     }
 });
