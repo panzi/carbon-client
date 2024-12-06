@@ -34,6 +34,9 @@ const client = new CarbonClient({
 });
 ```
 
+See e.g. [this](https://gist.github.com/pcan/e384fcad2a83e3ce20f9a4c33f4a13ae#file-readme-md)
+for how to generate the appropriate certificate files with OpenSSL.
+
 Features
 --------
 
