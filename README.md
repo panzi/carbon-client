@@ -37,11 +37,11 @@ const client = new CarbonClient({
 Features
 --------
 
-* TCP, UDP, Unix domain sockets
+* TCP, UDP, Unix domain sockets, TLS
 * IPv4 and IPv6
 * Carbon plain-text protocol
 * Validates keys, tag-names, and tag-values.
-* Batched writes.
+* Batched writes
 
 ### Optional Features
 
