@@ -347,14 +347,23 @@ export class CarbonClient {
     private readonly _tlsKey: Buffer[]|null;
     private readonly _tlsCA: Buffer[]|null;
 
+    /**
+     * TLS client certificate.
+     */
     get tlsCert(): ReadonlyArray<Buffer>|null {
         return this._tlsCert;
     }
 
+    /**
+     * TLS client private key.
+     */
     get tlsKey(): ReadonlyArray<Buffer>|null {
         return this._tlsKey;
     }
 
+    /**
+     * TLS certificate authoritie's certificate.
+     */
     get tlsCA(): ReadonlyArray<Buffer>|null {
         return this._tlsCA;
     }

@@ -9,8 +9,30 @@ Carbon Client
 [Graphite](https://graphiteapp.org/) [Carbon](https://github.com/graphite-project/carbon)
 client for ingesting metrics in TypeScript for NodeJS.
 
-This supports TCP, UDP, and would even support Unix domain sockets, although
-those aren't supported by Carbon.
+This library supports both TCP and UDP. In addition to these standard ways to
+talk to Carbon this library supports Unix domain sockets and TLS connections.
+
+The Carbon protocol is an unencrypted line based plain text protocol, so you
+shouldn't let Carbon listen on anything else than localhost. You can secure
+your Carbon server by putting it behind a TLS proxy e.g. like this:
+
+```bash
+socat \
+    openssl-listen:5000,reuseaddr,cert=server-crt.pem,cafile=ca-crt.pem,key=server-key.pem \
+    TCP:localhost:2001
+```
+
+Then you can connect using a client certificate from another machine like this:
+
+```TypeScript
+const client = new CarbonClient({
+    address: 'carbon.example.com',
+    port: 5000,
+    tlsCert: fs.readFileSync('client-crt.pem'),
+    tlsKey:  fs.readFileSync('client-key.pem'),
+    tlsCA:   fs.readFileSync('ca-crt.pem'),
+});
+```
 
 Features
 --------
@@ -23,7 +45,7 @@ Features
 
 ### Optional Features
 
-These features are controled via options.
+These features are controlled via options.
 
 * Prefix all keys.
 * Buffering to a fixed size buffer and sending that buffer at a defined interval.
