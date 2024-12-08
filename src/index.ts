@@ -942,7 +942,7 @@ export class CarbonClient {
             }
 
             if (this._sendBuffer && this._sendBufferOffset > 0) {
-                const buf = this._sendBuffer.slice(0, this._sendBufferOffset);
+                const buf = this._sendBuffer.subarray(0, this._sendBufferOffset);
                 this._sendBufferOffset = 0;
 
                 this._send(buf, error => {
@@ -1085,7 +1085,7 @@ export class CarbonClient {
     private _sendCallback = () => {
         this._sendIntervalTimer = null;
         if (this._sendBuffer && this._sendBufferOffset > 0) {
-            const buf = this._sendBuffer.slice(0, this._sendBufferOffset);
+            const buf = this._sendBuffer.subarray(0, this._sendBufferOffset);
             this._sendBufferOffset = 0;
             this._send(buf, error => {
                 if (error) {
@@ -1104,11 +1104,15 @@ export class CarbonClient {
             const byteCount = Buffer.byteLength(data);
             let newOffset = byteCount + this._sendBufferOffset;
             if (newOffset > this._sendBuffer.length && this._sendBufferOffset > 0) {
-                const buf = this._sendBuffer.slice(0, this._sendBufferOffset);
+                // subarray() doesn't copy the underlying buffer, so since we clear
+                // _sendBufferOffset, when we pass buf to an async function that
+                // might interleve with any kind of write() calls we need to copy
+                // that buffer.
+                const buf = this._sendBuffer.subarray(0, this._sendBufferOffset);
                 this._sendBufferOffset = 0;
                 newOffset = byteCount;
                 if (newOffset < this._sendBuffer.length) {
-                    const promise = this._send(buf);
+                    const promise = this._send(Buffer.from(buf));
 
                     this._sendBuffer.write(data, this._sendBufferOffset);
                     this._sendBufferOffset = newOffset;
@@ -1122,7 +1126,7 @@ export class CarbonClient {
                     // doesn't fit into buffer, send immediately
                     if (this._socket instanceof DgramSocket) {
                         // if at all possible don't exceed sendBufferSize in one send using UDP
-                        return this._send(buf).then(() => this._send(data));
+                        return this._send(Buffer.from(buf)).then(() => this._send(data));
                     }
                     return this._send(Buffer.concat([ buf, Buffer.from(data) ]));
                 }
