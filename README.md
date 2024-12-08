@@ -28,6 +28,7 @@ Then you can connect using a client certificate from another machine like this:
 const client = new CarbonClient({
     address: 'carbon.example.com',
     port: 5000,
+    transport: 'TLS',
     tlsCert: fs.readFileSync('client-crt.pem'),
     tlsKey:  fs.readFileSync('client-key.pem'),
     tlsCA:   fs.readFileSync('ca-crt.pem'),
