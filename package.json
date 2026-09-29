@@ -4,13 +4,18 @@
   "description": "Simple Graphite Carbon client for ingesting metrics in TypeScript for NodeJS.",
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
+  "type": "module",
   "scripts": {
     "test": "jest --detectOpenHandles --forceExit",
     "build": "tsc",
-    "build:doc": "typedoc src/index.ts"
+    "build:doc": "typedoc src/index.ts",
+    "mkcerts": "./test/mkcerts.sh"
   },
   "keywords": [
-    "graphite", "carbon", "carbon-cache", "metrics"
+    "graphite",
+    "carbon",
+    "carbon-cache",
+    "metrics"
   ],
   "author": "Mathias Panzenböck",
   "license": "MIT",
@@ -24,7 +29,7 @@
   "homepage": "https://github.com/panzi/carbon-client#readme",
   "devDependencies": {
     "@types/jest": "^29.5.14",
-    "@types/node": "^18.17.0",
+    "@types/node": "^18.19.130",
     "jest": "^29.7.0",
     "mockdate": "^3.0.5",
     "ts-jest": "^29.2.5",

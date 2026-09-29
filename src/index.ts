@@ -1052,7 +1052,7 @@ export class CarbonClient {
         try {
             for (const info of infos.callbacks) {
                 try {
-                    info.callback.call(this, arg);
+                    (info.callback as any).call(this, arg);
                 } catch (error) {
                     if (event !== 'error' && this._callbacks.error.callbacks.length > 0) {
                         setImmediate(() =>

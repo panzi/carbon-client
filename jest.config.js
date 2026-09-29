@@ -1,5 +1,3 @@
-module.exports = {
-    preset: 'ts-jest',
-    testEnvironment: 'node',
-    testMatch: [ "**/test/**/*.[jt]s?(x)" ],
-};
+export const preset = 'ts-jest';
+export const testEnvironment = 'node';
+export const testMatch = ["**/test/**/*.[jt]s?(x)"];
